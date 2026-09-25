@@ -57,6 +57,15 @@ describe("admin user management", () => {
     await expect(superAdminCaller.adminUsers.adjustWallet({ userId: 999999999, currency: "USD", direction: "credit", amount: 10, reason: "Crédit contrôlé" })).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
+  it("keeps direct status changes and admin creation reserved for Super Admin", async () => {
+    const adminCaller = appRouter.createCaller(context("admin"));
+    const superAdminCaller = appRouter.createCaller(context("super_admin"));
+    await expect(adminCaller.adminUsers.setStatusDirect({ userId: 999999999, status: "restricted", reason: "Suspension contrôlée" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(adminCaller.adminUsers.createAdmin({ name: "Nouvel Admin", email: "new-admin@example.com", password: "temporary-password-2026", reason: "Création contrôlée" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(superAdminCaller.adminUsers.setStatusDirect({ userId: 999999999, status: "active", reason: "Déverrouillage contrôlé" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(superAdminCaller.adminUsers.createAdmin({ name: "Nouvel Admin", email: "serge@mediabeyondvision.com", password: "temporary-password-2026", reason: "Création contrôlée" })).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("returns a safe not-found result for an admin detail and rejects unknown mutations", async () => {
     const caller = appRouter.createCaller(context("admin"));
     await expect(caller.adminUsers.detail({ userId: 999999999 })).resolves.toBeNull();

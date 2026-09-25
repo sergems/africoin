@@ -1,11 +1,12 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { TRPCError } from "@trpc/server";
 import { auditLogs, clientProfiles, complianceAlerts, depositRequests, idempotencyKeys, kycCases, kycDocuments, legalAcceptances, localCredentials, notifications, orders, positions, riskLimits, users, walletTransactions, wallets, watchlistItems, watchlists, withdrawalRequests } from "../drizzle/schema";
 import { getDb, getOrCreateRiskLimit, writeAuditLog } from "./db";
 import type { PlatformRole } from "@shared/permissions";
 import { createApprovalRequest } from "./adminApprovals";
-import { normalizeEmail } from "./localAuth";
+import { hashPassword, normalizeEmail } from "./localAuth";
 
 export type AdminUserRole = "user" | "compliance" | "admin" | "super_admin";
 export type AdminUserStatus = "active" | "restricted" | "blocked";
@@ -118,6 +119,43 @@ export async function requestAdminUserStatus(input: { actorUserId: number; targe
     if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable." });
   }
   return createApprovalRequest({ actionType: "account_status", requesterUserId: input.actorUserId, targetUserId: input.targetUserId, payload: { targetUserId: input.targetUserId, status: input.status }, reason: input.reason });
+}
+
+export async function setSuperAdminUserStatus(input: { actorUserId: number; targetUserId: number; status: AdminUserStatus; reason: string }) {
+  if (!canChangeUserStatus(input.actorUserId, input.targetUserId, input.status)) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas se suspendre lui-même." });
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour modifier le statut." });
+  const target = (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0];
+  if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable." });
+  const current = (await db.select().from(riskLimits).where(eq(riskLimits.userId, input.targetUserId)).limit(1))[0];
+  await getOrCreateRiskLimit(input.targetUserId);
+  await db.update(riskLimits).set({ status: input.status, updatedBy: input.actorUserId }).where(eq(riskLimits.userId, input.targetUserId));
+  await writeAuditLog({ ...buildUserAdminAudit("admin.user_status_updated_directly", input.targetUserId, input.reason, current?.status ?? "active", input.status), actorUserId: input.actorUserId });
+  return { success: true as const, status: input.status };
+}
+
+export async function createAdminAccount(input: { actorUserId: number; name: string; email: string; password: string; reason: string }) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour créer un administrateur." });
+  const email = normalizeEmail(input.email);
+  const existing = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
+  if (existing) throw new TRPCError({ code: "CONFLICT", message: "Cette adresse email est déjà utilisée." });
+  const credential = (await db.select().from(localCredentials).where(eq(localCredentials.email, email)).limit(1))[0];
+  if (credential) throw new TRPCError({ code: "CONFLICT", message: "Cette adresse email est déjà utilisée." });
+  const openId = `local-admin-${createHash("sha256").update(email).digest("hex").slice(0, 48)}`;
+  const passwordHash = await hashPassword(input.password);
+  let createdUserId = 0;
+  await db.transaction(async tx => {
+    const inserted = await tx.insert(users).values({ openId, name: input.name.trim(), email, loginMethod: "email", role: "admin" });
+    createdUserId = Number(inserted[0].insertId);
+    await tx.insert(localCredentials).values({ userId: createdUserId, email, passwordHash, emailVerifiedAt: new Date() });
+    await tx.insert(clientProfiles).values({ userId: createdUserId, country: "RDC", preferredCurrency: "USD", investorExperience: "none", riskProfile: "unassessed" });
+    await tx.insert(riskLimits).values({ userId: createdUserId, status: "active" });
+    await tx.insert(wallets).values([{ userId: createdUserId, currency: "USD" }, { userId: createdUserId, currency: "CDF" }]);
+    await tx.insert(kycCases).values({ userId: createdUserId, status: "not_started", riskLevel: "medium" });
+  });
+  await writeAuditLog({ actorUserId: input.actorUserId, action: "admin.account_created", entityType: "user", entityId: String(createdUserId), severity: "warning", metadata: { reason: input.reason, email, role: "admin" } });
+  return { success: true as const, userId: createdUserId, email, role: "admin" as const, emailVerified: true as const };
 }
 
 export async function requestAdminUserRole(input: { actorUserId: number; targetUserId: number; role: AdminUserRole; reason: string }) {
