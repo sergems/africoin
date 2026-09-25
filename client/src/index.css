@@ -1,35 +1,57 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 
 :root {
-  --background: 168 18% 97%;
-  --foreground: 213 62% 9%;
+  --background: 60 20% 97%;
+  --foreground: 207 67% 12%;
   --card: 0 0% 100%;
-  --card-foreground: 213 62% 9%;
+  --card-foreground: 207 67% 12%;
   --popover: 0 0% 100%;
-  --popover-foreground: 213 62% 9%;
-  --primary: 213 62% 9%;
+  --popover-foreground: 207 67% 12%;
+  --primary: 207 67% 12%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 43 76% 58%;
-  --secondary-foreground: 213 62% 9%;
-  --muted: 150 16% 94%;
-  --muted-foreground: 207 12% 45%;
-  --accent: 163 73% 44%;
-  --accent-foreground: 213 62% 9%;
-  --destructive: 4 51% 57%;
+  --secondary: 45 77% 57%;
+  --secondary-foreground: 207 67% 12%;
+  --muted: 180 13% 93%;
+  --muted-foreground: 209 22% 43%;
+  --accent: 168 77% 41%;
+  --accent-foreground: 207 67% 12%;
+  --destructive: 4 62% 54%;
   --destructive-foreground: 0 0% 100%;
-  --border: 210 20% 88%;
-  --input: 210 20% 88%;
-  --ring: 163 73% 44%;
-  --radius: 1rem;
+  --border: 192 20% 88%;
+  --input: 192 20% 88%;
+  --ring: 168 77% 41%;
+  --radius: .75rem;
+  --atg-midnight: #071a2a;
+  --atg-deep: #0d2638;
+  --atg-ivory: #f7f7f2;
+  --atg-gold: #e6b93f;
+  --atg-emerald: #18b89a;
+  --atg-teal: #087f78;
+  --atg-ink: #0a2233;
+  --atg-slate: #587086;
+  --atg-line: #dce4e5;
 }
 
 * { border-color: hsl(var(--border)); }
-html { background: #f5f7f5; }
-body { margin: 0; min-width: 320px; background: #f5f7f5; color: hsl(var(--foreground)); font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'cv11' 1, 'ss01' 1; }
-h1, h2, h3, h4, h5, h6 { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
-button, a, input, select, textarea { font-family: 'Roboto', 'Inter', sans-serif; transition-duration: 160ms; }
+html { background: var(--atg-ivory); scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; background: var(--atg-ivory); color: hsl(var(--foreground)); font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'cv11' 1, 'ss01' 1; }
+h1, h2, h3, h4, h5, h6, nav, button, a { font-family: 'Manrope', 'Inter', ui-sans-serif, system-ui, sans-serif; }
+button, a, input, select, textarea { transition-duration: 160ms; }
 button:active { transform: scale(.98); }
-::selection { background: #20c9a5; color: #061526; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--atg-emerald); outline-offset: 3px; }
+::selection { background: rgba(230,185,63,.35); color: var(--atg-ink); }
+
+.atg-grid { background-image: linear-gradient(rgba(255,255,255,.055) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.055) 1px, transparent 1px); background-size: 56px 56px; }
+.atg-rule { height: 1px; background: var(--atg-line); }
+.atg-kicker { font-family: 'Manrope', sans-serif; font-size: .68rem; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; }
+.atg-mono { font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.atg-panel { border: 1px solid rgba(220,228,229,.9); background: rgba(255,255,255,.78); box-shadow: 0 18px 55px rgba(7,26,42,.08); }
+.atg-display { font-size: clamp(2.75rem, 5.4vw, 5.4rem); line-height: .99; letter-spacing: -.07em; }
+.atg-page-title { font-size: clamp(2.35rem, 4.1vw, 4.4rem); line-height: 1.02; letter-spacing: -.065em; }
+.atg-section-title { font-size: clamp(1.95rem, 3.1vw, 3.25rem); line-height: 1.06; letter-spacing: -.06em; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

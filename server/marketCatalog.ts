@@ -20,6 +20,15 @@ export const pendingActivationInstruments = [
   { id: 119, symbol: "USDZAR", name: "Dollar / Rand sud-africain", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "ZAR", price: "17.8420", changePercent: "0.34", riskLevel: "high", provider: "pending_activation" },
   { id: 120, symbol: "USDCNH", name: "Dollar / Yuan offshore", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "CNH", price: "7.1180", changePercent: "0.12", riskLevel: "high", provider: "pending_activation" },
   { id: 121, symbol: "USDCDF", name: "Dollar / Franc congolais", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "CDF", price: "2850.0000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 122, symbol: "USDKES", name: "Dollar / Shilling kényan", assetClass: "fx_spot", exchange: "African FX", baseCurrency: "USD", quoteCurrency: "KES", price: "129.2500", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 123, symbol: "USDNGN", name: "Dollar / Naira nigérian", assetClass: "fx_spot", exchange: "African FX", baseCurrency: "USD", quoteCurrency: "NGN", price: "1600.0000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 124, symbol: "USDGHS", name: "Dollar / Cedi ghanéen", assetClass: "fx_spot", exchange: "African FX", baseCurrency: "USD", quoteCurrency: "GHS", price: "15.6000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 125, symbol: "USDUGX", name: "Dollar / Shilling ougandais", assetClass: "fx_spot", exchange: "African FX", baseCurrency: "USD", quoteCurrency: "UGX", price: "3700.0000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 126, symbol: "USDTZS", name: "Dollar / Shilling tanzanien", assetClass: "fx_spot", exchange: "African FX", baseCurrency: "USD", quoteCurrency: "TZS", price: "2700.0000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 127, symbol: "USDRWF", name: "Dollar / Franc rwandais", assetClass: "fx_spot", exchange: "African FX", baseCurrency: "USD", quoteCurrency: "RWF", price: "1380.0000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+  { id: 128, symbol: "AFR50", name: "African 50 Index", assetClass: "index", exchange: "African Indices", baseCurrency: "USD", quoteCurrency: "USD", price: "1000.0000", changePercent: "0.00", riskLevel: "medium", provider: "pending_activation" },
+  { id: 129, symbol: "DSEI", name: "Dar es Salaam All Share Index", assetClass: "index", exchange: "African Indices", baseCurrency: "TZS", quoteCurrency: "TZS", price: "2450.0000", changePercent: "0.00", riskLevel: "medium", provider: "pending_activation" },
+  { id: 130, symbol: "NSE30", name: "Nairobi Securities Exchange 30", assetClass: "index", exchange: "African Indices", baseCurrency: "KES", quoteCurrency: "KES", price: "185.0000", changePercent: "0.00", riskLevel: "medium", provider: "pending_activation" },
 ] as const;
 
 export type MarketInstrument = (typeof pendingActivationInstruments)[number];

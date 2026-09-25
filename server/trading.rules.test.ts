@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
 import { providerRegistry } from "./providers";
+import { resolveTradeExecutionMode } from "./tradingGuards";
 import type { TrpcContext } from "./_core/context";
 
 function context(role: "user" | "compliance" | "admin" = "user"): TrpcContext {
@@ -22,6 +23,11 @@ function context(role: "user" | "compliance" | "admin" = "user"): TrpcContext {
 }
 
 describe("AFRICOIN TRADING GROUP controls", () => {
+  it("submits trades automatically without an administrative approval state", () => {
+    expect({ status: "submitted", executionMode: resolveTradeExecutionMode(false) }).toEqual({ status: "submitted", executionMode: "pending_activation" });
+    expect(resolveTradeExecutionMode(true)).toBe("broker");
+  });
+
   it("rejects a limit order without a limit price", async () => {
     const caller = appRouter.createCaller(context());
     await expect(caller.orders.placeSpot({

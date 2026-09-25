@@ -8,10 +8,11 @@ function userContext(): TrpcContext {
 }
 
 describe("platform safety controls", () => {
-  it("keeps every partner adapter in pending_activation mode by default", () => {
+  it("keeps external adapters inactive while the Africoin internal broker is live", () => {
     const providers = getProviderRegistry();
     expect(providers.length).toBeGreaterThanOrEqual(5);
-    expect(providers.every(provider => provider.mode === "pending_activation" && provider.connected === false)).toBe(true);
+    expect(providers.find(provider => provider.name === "Africoin Internal Broker")).toMatchObject({ category: "brokerage", mode: "live", connected: true });
+    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker").every(provider => provider.mode === "pending_activation" && provider.connected === false)).toBe(true);
   });
 
   it("rejects non-positive order quantities at the contract boundary", async () => {
@@ -21,14 +22,14 @@ describe("platform safety controls", () => {
 
   it("keeps CFDs and leverage outside the supported order contract", () => {
     const providers = getProviderRegistry();
-    expect(providers.some(provider => provider.category === "brokerage" && provider.mode === "pending_activation")).toBe(true);
+    expect(providers.some(provider => provider.category === "brokerage" && provider.name === "Africoin Internal Broker" && provider.mode === "live")).toBe(true);
   });
 });
 
-  it("does not expose a live execution adapter before partner connection", () => {
+  it("does not expose an external live execution adapter before partner connection", () => {
     const providers = getProviderRegistry();
-    expect(providers.every(provider => provider.connected === false)).toBe(true);
-    expect(providers.every(provider => provider.mode !== "live")).toBe(true);
+    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker").every(provider => provider.connected === false)).toBe(true);
+    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker").every(provider => provider.mode !== "live")).toBe(true);
   });
 
   it("blocks orders before partner checks when KYC is not approved", async () => {

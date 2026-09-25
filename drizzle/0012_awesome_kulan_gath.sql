@@ -1,0 +1,4 @@
+ALTER TABLE `instruments` MODIFY COLUMN `assetClass` enum('equity','fx_spot','index') NOT NULL;--> statement-breakpoint
+ALTER TABLE `positions` MODIFY COLUMN `currency` enum('CDF','USD','KES','NGN','ZAR','GHS','UGX','TZS','RWF','JPY','CAD','CHF','CNH') NOT NULL;--> statement-breakpoint
+ALTER TABLE `wallet_transactions` MODIFY COLUMN `currency` enum('CDF','USD','KES','NGN','ZAR','GHS','UGX','TZS','RWF','JPY','CAD','CHF','CNH') NOT NULL;--> statement-breakpoint
+ALTER TABLE `wallets` MODIFY COLUMN `currency` enum('CDF','USD','KES','NGN','ZAR','GHS','UGX','TZS','RWF','JPY','CAD','CHF','CNH') NOT NULL;

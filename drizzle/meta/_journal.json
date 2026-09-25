@@ -78,6 +78,20 @@
       "when": 1789576890000,
       "tag": "0010_popular_market_instruments",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1790372122887,
+      "tag": "0011_normal_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1790375133847,
+      "tag": "0012_awesome_kulan_gath",
+      "breakpoints": true
     }
   ]
 }

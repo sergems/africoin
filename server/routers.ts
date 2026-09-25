@@ -59,7 +59,8 @@ import { createApprovalRequest, decideApproval, listApprovalRequests } from "./a
 import { hashPassword, normalizeEmail, verifyPassword } from "./localAuth";
 import { sdk } from "./_core/sdk";
 import type { TrpcContext } from "./_core/context";
-import { evaluateTradingEligibility } from "./tradingGuards";
+import { evaluateTradingEligibility, resolveTradeExecutionMode } from "./tradingGuards";
+import { processTriggeredInternalOrders } from "./internalBroker";
 
 const requireCompliance = permissionProcedure("kyc.review");
 
@@ -75,7 +76,7 @@ function exposeVerificationToken(token: string) {
 }
 
 
-async function ensureWallet(userId: number, currency: "CDF" | "USD") {
+async function ensureWallet(userId: number, currency: "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH") {
   const db = await getDb();
   if (!db) return undefined;
   const found = await db.select().from(wallets).where(and(eq(wallets.userId, userId), eq(wallets.currency, currency))).limit(1);
@@ -204,6 +205,7 @@ export const appRouter = router({
     catalog: publicProcedure.input(z.object({ query: z.string().optional(), assetClass: z.enum(["all", "equity", "fx_spot"]).default("all") }).optional()).query(async ({ input }) => {
       const dbRows = await getInstruments();
       const rows = dbRows.length ? dbRows : pendingActivationInstruments;
+      await Promise.all(rows.map(row => processTriggeredInternalOrders(Number(row.id), Number(row.price))));
       const query = input?.query?.trim().toLowerCase() ?? "";
       return rows.filter(row => (input?.assetClass === "all" || !input?.assetClass || row.assetClass === input.assetClass) && (!query || row.symbol.toLowerCase().includes(query) || row.name.toLowerCase().includes(query)));
     }),
@@ -211,6 +213,7 @@ export const appRouter = router({
       const rows = await getInstruments();
       const found = rows.find(row => row.symbol === input.symbol) ?? pendingActivationInstruments.find(row => row.symbol === input.symbol);
       if (!found) throw new TRPCError({ code: "NOT_FOUND", message: "Instrument introuvable." });
+      await processTriggeredInternalOrders(Number(found.id), Number(found.price));
       return { ...found, asOf: new Date(), source: found.provider === "pending_activation" ? "Source partenaire en cours de connexion" : found.provider };
     }),
   }),
@@ -250,47 +253,73 @@ export const appRouter = router({
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour annuler un ordre." });
       const order = (await db.select().from(orders).where(and(eq(orders.id, input.orderId), eq(orders.userId, ctx.user.id))).limit(1))[0];
       if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Ordre introuvable." });
-      if (order.status !== "pending_approval") throw new TRPCError({ code: "BAD_REQUEST", message: "Seuls les ordres en attente peuvent être annulés." });
+      if (order.status !== "pending_approval" && order.status !== "submitted") throw new TRPCError({ code: "BAD_REQUEST", message: "Seuls les ordres en attente peuvent être annulés." });
       const instrument = (await db.select().from(instruments).where(eq(instruments.id, order.instrumentId)).limit(1))[0];
       if (!instrument) throw new TRPCError({ code: "NOT_FOUND", message: "Instrument introuvable." });
       const notional = Number(order.limitPrice ?? instrument.price) * Number(order.quantity);
-      const wallet = await ensureWallet(ctx.user.id, instrument.quoteCurrency as "CDF" | "USD");
+      const wallet = await ensureWallet(ctx.user.id, instrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH");
       if (!wallet) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Portefeuille indisponible." });
       await db.transaction(async tx => {
         await tx.update(orders).set({ status: "cancelled", rejectionReason: "Annulé par le client", updatedAt: new Date() }).where(eq(orders.id, order.id));
-        await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} + ${notional}`, pendingBalance: sql`GREATEST(${wallets.pendingBalance} - ${notional}, 0)` }).where(eq(wallets.id, wallet.id));
+        if (order.side === "buy") await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} + ${notional}`, pendingBalance: sql`GREATEST(${wallets.pendingBalance} - ${notional}, 0)` }).where(eq(wallets.id, wallet.id));
         await tx.insert(notifications).values({ userId: ctx.user.id, type: "order", title: "Ordre annulé", message: `${order.quantity} ${instrument.symbol} · ${notional} ${instrument.quoteCurrency} libérés.` });
       });
       await writeAuditLog({ actorUserId: ctx.user.id, action: "order.pending_approval_cancelled", entityType: "order", entityId: String(order.id), metadata: { notional, currency: instrument.quoteCurrency } });
       return { success: true as const };
     }),
-    placeSpot: protectedProcedure.input(z.object({ instrumentId: z.number().int().positive(), symbol: z.string().min(1), side: z.enum(["buy", "sell"]), orderType: z.enum(["market", "limit"]).default("market"), quantity: z.number().positive().max(1000000), limitPrice: z.number().positive().optional(), idempotencyKey: z.string().min(8).max(160).optional() })).mutation(async ({ ctx, input }) => {
-      if (input.orderType === "limit" && !input.limitPrice) throw new TRPCError({ code: "BAD_REQUEST", message: "Un prix limite est requis." });
+    placeSpot: protectedProcedure.input(z.object({ instrumentId: z.number().int().positive(), symbol: z.string().min(1), side: z.enum(["buy", "sell"]), orderType: z.enum(["market", "limit", "stop"]).default("market"), quantity: z.number().positive().max(1000000), limitPrice: z.number().positive().optional(), stopLoss: z.number().positive().optional(), takeProfit: z.number().positive().optional(), idempotencyKey: z.string().min(8).max(160).optional() })).mutation(async ({ ctx, input }) => {
+      if ((input.orderType === "limit" || input.orderType === "stop") && !input.limitPrice) throw new TRPCError({ code: "BAD_REQUEST", message: "Un prix d’activation est requis pour cet ordre." });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour vérifier votre éligibilité et votre solde." });
       if (input.idempotencyKey) { const previous = await getIdempotentResponse(ctx.user.id, input.idempotencyKey, "order.placeSpot"); if (previous) return previous; }
       const instrument = await db.select().from(instruments).where(eq(instruments.id, input.instrumentId)).limit(1);
       const catalogInstrument = instrument[0] ?? pendingActivationInstruments.find(item => item.id === input.instrumentId);
-      const price = input.limitPrice ?? Number(catalogInstrument?.price ?? 0);
+      const price = Number(catalogInstrument?.price ?? 0);
       if (!catalogInstrument || price <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Instrument non disponible." });
+      const executionPrice = input.orderType === "market" ? price : Number(input.limitPrice);
+      const notional = executionPrice * input.quantity;
       const kyc = await getKycCase(ctx.user.id);
-      const wallet = await ensureWallet(ctx.user.id, catalogInstrument.quoteCurrency as "CDF" | "USD");
+      const wallet = await ensureWallet(ctx.user.id, catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH");
       if (!wallet) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Portefeuille indisponible." });
-      const eligibility = evaluateTradingEligibility({ kycStatus: kyc?.status, walletStatus: wallet?.status, availableBalance: Number(wallet?.availableBalance ?? 0), notional: price * input.quantity });
+      const eligibility = evaluateTradingEligibility({ kycStatus: kyc?.status, walletStatus: wallet.status, availableBalance: input.side === "sell" ? Number.MAX_SAFE_INTEGER : Number(wallet.availableBalance), notional });
       if (!eligibility.allowed) throw new TRPCError({ code: eligibility.reason === "kyc_pending" ? "FORBIDDEN" : "BAD_REQUEST", message: eligibility.message });
       const reference = randomReference("ORD");
+      const executionMode = resolveTradeExecutionMode(hasConnectedProvider("brokerage"));
+      const isMarket = input.orderType === "market";
       const orderId = await db.transaction(async tx => {
-        const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${price * input.quantity}`, pendingBalance: sql`${wallets.pendingBalance} + ${price * input.quantity}` }).where(and(eq(wallets.id, wallet.id), sql`${wallets.availableBalance} >= ${price * input.quantity}`));
-        if (!reserved[0]?.affectedRows) throw new TRPCError({ code: "BAD_REQUEST", message: "Solde disponible insuffisant pour réserver cet ordre." });
-        const inserted = await tx.insert(orders).values({ userId: ctx.user.id, instrumentId: input.instrumentId, side: input.side, orderType: input.orderType, quantity: input.quantity.toFixed(8), limitPrice: input.limitPrice?.toFixed(8), filledQuantity: "0", averagePrice: null, status: "pending_approval", executionMode: "pending_activation", createdAt: new Date(), updatedAt: new Date(), executedAt: null });
-        await tx.insert(notifications).values({ userId: ctx.user.id, type: "order", title: "Ordre en attente de validation", message: `${input.side === "buy" ? "Achat" : "Vente"} ${input.quantity} ${input.symbol} · ${price * input.quantity} ${catalogInstrument.quoteCurrency} réservés jusqu’à validation.` });
+        const position = (await tx.select().from(positions).where(and(eq(positions.userId, ctx.user.id), eq(positions.instrumentId, input.instrumentId))).limit(1))[0];
+        if (input.side === "sell" && Number(position?.quantity ?? 0) < input.quantity) throw new TRPCError({ code: "BAD_REQUEST", message: "Position insuffisante pour vendre cette quantité." });
+        if (isMarket) {
+          if (input.side === "buy") {
+            const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${notional}`, updatedAt: new Date() }).where(and(eq(wallets.id, wallet.id), sql`${wallets.availableBalance} >= ${notional}`));
+            if (!reserved[0]?.affectedRows) throw new TRPCError({ code: "BAD_REQUEST", message: "Solde disponible insuffisant pour exécuter cet ordre." });
+            const oldQuantity = Number(position?.quantity ?? 0);
+            const newQuantity = oldQuantity + input.quantity;
+            const averageCost = ((oldQuantity * Number(position?.averageCost ?? 0)) + notional) / newQuantity;
+            if (position) await tx.update(positions).set({ quantity: newQuantity.toFixed(8), averageCost: averageCost.toFixed(8), currency: catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH", updatedAt: new Date() }).where(eq(positions.id, position.id));
+            else await tx.insert(positions).values({ userId: ctx.user.id, instrumentId: input.instrumentId, quantity: input.quantity.toFixed(8), averageCost: executionPrice.toFixed(8), unrealizedPnl: "0", currency: catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH", updatedAt: new Date() });
+            await tx.insert(walletTransactions).values({ walletId: wallet.id, userId: ctx.user.id, type: "trade_debit", direction: "debit", amount: notional.toFixed(8), currency: catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH", status: "completed", reference: `${reference}-DEBIT`, description: `Achat interne ${input.quantity} ${input.symbol} à ${executionPrice}`, completedAt: new Date() });
+          } else {
+            const released = await tx.update(positions).set({ quantity: sql`${positions.quantity} - ${input.quantity}`, updatedAt: new Date() }).where(and(eq(positions.id, position!.id), sql`${positions.quantity} >= ${input.quantity}`));
+            if (!released[0]?.affectedRows) throw new TRPCError({ code: "BAD_REQUEST", message: "Position insuffisante pour vendre cette quantité." });
+            await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} + ${notional}`, updatedAt: new Date() }).where(eq(wallets.id, wallet.id));
+            await tx.insert(walletTransactions).values({ walletId: wallet.id, userId: ctx.user.id, type: "trade_credit", direction: "credit", amount: notional.toFixed(8), currency: catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH", status: "completed", reference: `${reference}-CREDIT`, description: `Vente interne ${input.quantity} ${input.symbol} à ${executionPrice}`, completedAt: new Date() });
+          }
+        } else if (input.side === "buy") {
+          const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${notional}`, pendingBalance: sql`${wallets.pendingBalance} + ${notional}`, updatedAt: new Date() }).where(and(eq(wallets.id, wallet.id), sql`${wallets.availableBalance} >= ${notional}`));
+          if (!reserved[0]?.affectedRows) throw new TRPCError({ code: "BAD_REQUEST", message: "Solde disponible insuffisant pour réserver cet ordre." });
+        }
+        const inserted = await tx.insert(orders).values({ userId: ctx.user.id, instrumentId: input.instrumentId, side: input.side, orderType: input.orderType, quantity: input.quantity.toFixed(8), limitPrice: input.limitPrice?.toFixed(8), stopLoss: input.stopLoss?.toFixed(8), takeProfit: input.takeProfit?.toFixed(8), marginUsed: notional.toFixed(8), filledQuantity: isMarket ? input.quantity.toFixed(8) : "0", averagePrice: isMarket ? executionPrice.toFixed(8) : null, realizedPnl: null, status: isMarket ? "filled" : "submitted", executionMode, providerReference: isMarket ? `AFRIBROKER-${reference}` : null, createdAt: new Date(), updatedAt: new Date(), executedAt: isMarket ? new Date() : null });
+        await tx.insert(notifications).values({ userId: ctx.user.id, type: "order", title: isMarket ? "Ordre exécuté" : "Ordre transmis", message: isMarket ? `${input.side === "buy" ? "Achat" : "Vente"} ${input.quantity} ${input.symbol} · ${notional} ${catalogInstrument.quoteCurrency} exécuté par Africoin.` : `${input.side === "buy" ? "Achat" : "Vente"} ${input.quantity} ${input.symbol} · ordre ${input.orderType === "limit" ? "limite" : "stop"} en attente du cours déclencheur.` });
         return Number(inserted[0].insertId);
       });
-      await writeAuditLog({ actorUserId: ctx.user.id, action: "order.pending_approval_created", entityType: "order", entityId: String(orderId), metadata: { symbol: input.symbol, side: input.side, quantity: input.quantity, notional: price * input.quantity, currency: catalogInstrument.quoteCurrency } });
-      const response = { reference, status: "pending_approval" as const, executionMode: "pending_activation" as const, message: "Ordre enregistré. Le montant est réservé jusqu’à la validation de conformité et du partenaire." };
-      if (db && input.idempotencyKey) await saveIdempotentResponse(ctx.user.id, input.idempotencyKey, "order.placeSpot", response);
+      await writeAuditLog({ actorUserId: ctx.user.id, action: isMarket ? "order.filled_internal" : "order.submitted_internal", entityType: "order", entityId: String(orderId), metadata: { symbol: input.symbol, side: input.side, quantity: input.quantity, price: executionPrice, notional, currency: catalogInstrument.quoteCurrency, broker: "africoin_internal" } });
+      const response = isMarket
+        ? { reference, status: "filled" as const, executionMode, message: "Ordre exécuté par le broker interne Africoin." }
+        : { reference, status: "submitted" as const, executionMode, message: "Ordre transmis au broker interne et en attente du cours déclencheur." };
+      if (input.idempotencyKey) await saveIdempotentResponse(ctx.user.id, input.idempotencyKey, "order.placeSpot", response);
       return response;
-    }),
+    })
   }),
   wallets: router({
     balances: protectedProcedure.query(({ ctx }) => getUserWallets(ctx.user.id)),
@@ -376,6 +405,17 @@ export const appRouter = router({
       if (!db) return pendingActivationInstruments;
       const rows = await db.select().from(instruments).orderBy(instruments.assetClass, instruments.symbol);
       return rows.length ? rows : pendingActivationInstruments;
+    }),
+    createInstrument: adminProcedure.input(z.object({ symbol: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{3,16}$/), name: z.string().trim().min(3).max(160), assetClass: z.enum(["fx_spot", "index"]), exchange: z.string().trim().min(2).max(80), baseCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/), quoteCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/), price: z.number().positive().max(1000000000000), changePercent: z.number().min(-100).max(100).optional() })).mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Seul le super administrateur peut créer un nouvel instrument." });
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour créer un instrument." });
+      const existing = (await db.select().from(instruments).where(eq(instruments.symbol, input.symbol)).limit(1))[0];
+      if (existing) throw new TRPCError({ code: "CONFLICT", message: "Ce symbole existe déjà dans le catalogue." });
+      const inserted = await db.insert(instruments).values({ symbol: input.symbol, name: input.name, assetClass: input.assetClass, exchange: input.exchange, baseCurrency: input.baseCurrency, quoteCurrency: input.quoteCurrency, price: input.price.toFixed(8), changePercent: (input.changePercent ?? 0).toFixed(4), status: "active", riskLevel: "medium", provider: "africoin_internal", updatedAt: new Date() });
+      const instrumentId = Number(inserted[0].insertId);
+      await writeAuditLog({ actorUserId: ctx.user.id, action: "market.instrument_created", entityType: "instrument", entityId: String(instrumentId), metadata: { ...input, provider: "africoin_internal" } });
+      return (await db.select().from(instruments).where(eq(instruments.id, instrumentId)).limit(1))[0];
     }),
     updateRate: adminProcedure.input(z.object({ instrumentId: z.number().int().positive(), price: z.number().positive().max(1000000000000), changePercent: z.number().min(-100).max(100).optional(), status: z.enum(["active", "disabled", "pending_approval"]).optional(), note: z.string().trim().min(3).max(300) })).mutation(async ({ ctx, input }) => {
       const db = await getDb();

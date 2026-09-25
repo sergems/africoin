@@ -27,7 +27,7 @@ export interface CustodyProvider {
 
 export const providerRegistry: ProviderStatus[] = [
   { name: "Partenaire de paiement", category: "payments", mode: "pending_activation", connected: false, activationRequirements: ["Contrat partenaire agréé", "Identifiants API de production", "Webhooks signés", "Validation conformité"] },
-  { name: "Courtier agréé", category: "brokerage", mode: "pending_activation", connected: false, activationRequirements: ["Agrément de courtage vérifié", "Compte de règlement", "Credentials API", "Tests d’exécution et réconciliation"] },
+  { name: "Africoin Internal Broker", category: "brokerage", mode: "live", connected: true, activationRequirements: [] },
   { name: "Fournisseur FX", category: "fx", mode: "pending_activation", connected: false, activationRequirements: ["Accord de liquidité", "Cadre de change validé", "Limites de risque", "Webhooks de statut"] },
   { name: "Dépositaire / custody", category: "custody", mode: "pending_activation", connected: false, activationRequirements: ["Convention de conservation", "Mapping des comptes", "Réconciliation quotidienne"] },
   { name: "Données de marché", category: "market_data", mode: "pending_activation", connected: false, activationRequirements: ["Licence de données", "Clé API", "Limites de débit", "Politique d’attribution des cours"] },

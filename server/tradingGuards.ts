@@ -9,6 +9,10 @@ export type TradingEligibilityResult =
   | { allowed: true }
   | { allowed: false; reason: "kyc_pending" | "wallet_restricted" | "insufficient_balance" | "invalid_notional"; message: string };
 
+export function resolveTradeExecutionMode(brokerConnected: boolean) {
+  return brokerConnected ? "broker" as const : "pending_activation" as const;
+}
+
 export function evaluateTradingEligibility(input: TradingEligibilityInput): TradingEligibilityResult {
   if (input.kycStatus !== "approved") {
     return {
