@@ -1,0 +1,15 @@
+node_modules
+.pnpm-store
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+dist
+.manus-logs
+.webdev
+coverage
+*.log
+.DS_Store
+screenshots
+backups

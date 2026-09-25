@@ -1,0 +1,1 @@
+ALTER TABLE `instruments` MODIFY COLUMN `provider` varchar(80) NOT NULL DEFAULT 'pending_activation';

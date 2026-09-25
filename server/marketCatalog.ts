@@ -1,0 +1,25 @@
+export const pendingActivationInstruments = [
+  { id: 101, symbol: "AAPL", name: "Apple Inc.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "227.16", changePercent: "0.72", riskLevel: "medium", provider: "pending_activation" },
+  { id: 102, symbol: "MSFT", name: "Microsoft Corp.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "414.92", changePercent: "-0.18", riskLevel: "medium", provider: "pending_activation" },
+  { id: 103, symbol: "NVDA", name: "NVIDIA Corp.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "118.41", changePercent: "1.34", riskLevel: "high", provider: "pending_activation" },
+  { id: 107, symbol: "GOOGL", name: "Alphabet Inc.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "163.24", changePercent: "0.45", riskLevel: "medium", provider: "pending_activation" },
+  { id: 108, symbol: "AMZN", name: "Amazon.com Inc.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "186.29", changePercent: "0.31", riskLevel: "medium", provider: "pending_activation" },
+  { id: 109, symbol: "META", name: "Meta Platforms Inc.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "567.78", changePercent: "-0.26", riskLevel: "high", provider: "pending_activation" },
+  { id: 110, symbol: "TSLA", name: "Tesla Inc.", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "248.98", changePercent: "1.12", riskLevel: "high", provider: "pending_activation" },
+  { id: 111, symbol: "JPM", name: "JPMorgan Chase & Co.", assetClass: "equity", exchange: "NYSE", baseCurrency: "USD", quoteCurrency: "USD", price: "211.38", changePercent: "0.22", riskLevel: "medium", provider: "pending_activation" },
+  { id: 112, symbol: "V", name: "Visa Inc.", assetClass: "equity", exchange: "NYSE", baseCurrency: "USD", quoteCurrency: "USD", price: "276.84", changePercent: "0.16", riskLevel: "medium", provider: "pending_activation" },
+  { id: 113, symbol: "SPY", name: "SPDR S&P 500 ETF", assetClass: "equity", exchange: "NYSE Arca", baseCurrency: "USD", quoteCurrency: "USD", price: "573.06", changePercent: "0.28", riskLevel: "medium", provider: "pending_activation" },
+  { id: 114, symbol: "QQQ", name: "Invesco QQQ ETF", assetClass: "equity", exchange: "NASDAQ", baseCurrency: "USD", quoteCurrency: "USD", price: "483.61", changePercent: "0.39", riskLevel: "medium", provider: "pending_activation" },
+  { id: 104, symbol: "EURUSD", name: "Euro / Dollar", assetClass: "fx_spot", exchange: "FX", baseCurrency: "EUR", quoteCurrency: "USD", price: "1.1084", changePercent: "0.09", riskLevel: "high", provider: "pending_activation" },
+  { id: 105, symbol: "USDJPY", name: "Dollar / Yen", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "JPY", price: "143.82", changePercent: "-0.21", riskLevel: "high", provider: "pending_activation" },
+  { id: 106, symbol: "GBPUSD", name: "Livre / Dollar", assetClass: "fx_spot", exchange: "FX", baseCurrency: "GBP", quoteCurrency: "USD", price: "1.2861", changePercent: "0.16", riskLevel: "high", provider: "pending_activation" },
+  { id: 115, symbol: "AUDUSD", name: "Dollar australien / Dollar", assetClass: "fx_spot", exchange: "FX", baseCurrency: "AUD", quoteCurrency: "USD", price: "0.6742", changePercent: "-0.08", riskLevel: "high", provider: "pending_activation" },
+  { id: 116, symbol: "USDCAD", name: "Dollar / Dollar canadien", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "CAD", price: "1.3628", changePercent: "0.11", riskLevel: "high", provider: "pending_activation" },
+  { id: 117, symbol: "USDCHF", name: "Dollar / Franc suisse", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "CHF", price: "0.8624", changePercent: "-0.04", riskLevel: "high", provider: "pending_activation" },
+  { id: 118, symbol: "NZDUSD", name: "Dollar néo-zélandais / Dollar", assetClass: "fx_spot", exchange: "FX", baseCurrency: "NZD", quoteCurrency: "USD", price: "0.6128", changePercent: "0.07", riskLevel: "high", provider: "pending_activation" },
+  { id: 119, symbol: "USDZAR", name: "Dollar / Rand sud-africain", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "ZAR", price: "17.8420", changePercent: "0.34", riskLevel: "high", provider: "pending_activation" },
+  { id: 120, symbol: "USDCNH", name: "Dollar / Yuan offshore", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "CNH", price: "7.1180", changePercent: "0.12", riskLevel: "high", provider: "pending_activation" },
+  { id: 121, symbol: "USDCDF", name: "Dollar / Franc congolais", assetClass: "fx_spot", exchange: "FX", baseCurrency: "USD", quoteCurrency: "CDF", price: "2850.0000", changePercent: "0.00", riskLevel: "high", provider: "pending_activation" },
+] as const;
+
+export type MarketInstrument = (typeof pendingActivationInstruments)[number];
