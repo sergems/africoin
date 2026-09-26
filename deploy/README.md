@@ -6,8 +6,8 @@ The complete Linode Ubuntu deployment guide is in [`../DEPLOYMENT.md`](../DEPLOY
 | -------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `docker-compose.yml`       | Private MySQL service, app service, and one-off migration profile.                                        |
 | `env.example`              | Safe template for the real server `.env`; replace every placeholder and keep the real file at mode `600`. |
-| `nginx/app.bootstrap.conf` | Temporary HTTP-only proxy used while obtaining the first Let's Encrypt certificate.                       |
-| `nginx/app.conf`           | Final HTTPS reverse proxy for `africoin.gowinrdc.com` with API and WebSocket forwarding.                 |
+| `nginx/app.bootstrap.conf` | Temporary HTTP-only proxy used during first-run DNS or certificate setup.                                  |
+| `nginx/app.conf`           | Final HTTPS reverse proxy for `africointrading.com` with Cloudflare Origin SSL, API, and WebSocket forwarding. |
 | `scripts/deploy.sh`        | Fast-forward-only pull, image build, migration, restart, and health check.                                |
 | `scripts/backup.sh`        | Compressed MySQL backup with restrictive permissions.                                                     |
 | `scripts/restore.sh`       | Explicit-confirmation MySQL restore.                                                                      |

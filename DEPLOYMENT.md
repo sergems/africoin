@@ -140,7 +140,7 @@ Do not open port 3000 or port 3306. The application is bound to loopback and the
 
 ## F. Domain and DNS setup
 
-The production domain is `africoin.gowinrdc.com`. Create this A record at your DNS provider:
+The production domain is `africointrading.com`. Create this A record at your DNS provider:
 
 ```text
 Type: A
@@ -152,10 +152,10 @@ TTL: 300 or provider default
 Wait for DNS propagation and verify it from the server or your workstation:
 
 ```bash
-getent hosts africoin.gowinrdc.com
+getent hosts africointrading.com
 ```
 
-The repository Nginx files are already configured for `africoin.gowinrdc.com`.
+The repository Nginx files are already configured for `africointrading.com`.
 
 ## G. Clone the repository and configure the environment
 
@@ -305,59 +305,61 @@ unset ADMIN_EMAIL ADMIN_PASSWORD ADMIN_ROLE
 
 The bootstrap command creates or updates the local email/password account with the requested role and its initial USD/CDF wallets and KYC record. Use the resulting email and password at the Africoin login screen. Remove any admin credentials from `.env` after use. The password is never printed by the script.
 
-## K. Nginx installation before SSL
+## K. Nginx and Cloudflare Origin SSL
 
-Install Nginx and Certbot:
+The recommended production path is Cloudflare proxying with **SSL/TLS mode Full (strict)** and a Cloudflare Origin Certificate on the Linode server. The complete step-by-step migration guide is in [`docs/cloudflare-domain-ssl.md`](docs/cloudflare-domain-ssl.md).
+
+Install Nginx and create the certificate directory:
 
 ```bash
-apt install -y nginx certbot python3-certbot-nginx
+apt install -y nginx
+install -d -m 700 /etc/ssl/cloudflare
 mkdir -p /var/www/certbot
 ```
 
-Install the temporary HTTP configuration:
+In Cloudflare, add an A record for `africointrading.com` pointing to `45.79.210.216` and keep it **Proxied**. Create an Origin Certificate for `africointrading.com` and install the certificate and private key on the server:
 
 ```bash
-cp /opt/africoin/deploy/nginx/app.bootstrap.conf /etc/nginx/sites-available/africoin
+nano /etc/ssl/cloudflare/africointrading.com.pem
+chmod 644 /etc/ssl/cloudflare/africointrading.com.pem
+nano /etc/ssl/cloudflare/africointrading.com.key
+chmod 600 /etc/ssl/cloudflare/africointrading.com.key
+chown root:root /etc/ssl/cloudflare/africointrading.com.pem /etc/ssl/cloudflare/africointrading.com.key
+```
+
+Install the final Nginx configuration from the repository:
+
+```bash
+cp /opt/africoin/deploy/nginx/app.conf /etc/nginx/sites-available/africoin
 ln -sfn /etc/nginx/sites-available/africoin /etc/nginx/sites-enabled/africoin
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 ```
 
-At this point, HTTP should proxy to the application and the ACME challenge path should be available.
+The repository configuration expects:
 
-## K. Let's Encrypt SSL certificate
-
-Request the certificate after DNS resolves to `45.79.210.216`:
-
-```bash
-certbot certonly --webroot -w /var/www/certbot \
-  -d africoin.gowinrdc.com \
-  --email YOUR_EMAIL \
-  --agree-tos \
-  --no-eff-email
+```text
+/etc/ssl/cloudflare/africointrading.com.pem
+/etc/ssl/cloudflare/africointrading.com.key
 ```
 
-Install the final HTTPS configuration. Replace both the domain and certificate paths if you use a non-default domain:
+Set Cloudflare **SSL/TLS → Overview** to **Full (strict)**. Do not use Flexible mode.
+
+Verify HTTPS and the application:
 
 ```bash
-cp /opt/africoin/deploy/nginx/app.conf /etc/nginx/sites-available/africoin
-nginx -t
-systemctl reload nginx
+curl --fail https://africointrading.com/api/health
+systemctl is-active nginx
 ```
 
-Test the HTTPS endpoint:
+Expected health response:
 
-```bash
-curl --fail https://africoin.gowinrdc.com/api/health
+```json
+{ "status": "ok" }
 ```
 
-Certbot normally installs a renewal timer. Verify and test it:
-
-```bash
-systemctl status certbot.timer
-certbot renew --dry-run
-```
+If you prefer Let's Encrypt instead of Cloudflare Origin Certificates, use the temporary HTTP configuration in `deploy/nginx/app.bootstrap.conf`, obtain the certificate with Certbot, and update the certificate paths in `/etc/nginx/sites-available/africoin` accordingly. Do not mix the Let's Encrypt paths with the Cloudflare Origin Certificate paths.
 
 ## L. Updating the application
 
@@ -537,7 +539,7 @@ nginx -t
 **Command to check:**
 
 ```bash
-getent hosts africoin.gowinrdc.com
+getent hosts africointrading.com
 ```
 
 **Solution:** Point the A record to `45.79.210.216`, wait for propagation, and retry.
@@ -553,7 +555,7 @@ getent hosts africoin.gowinrdc.com
 ```bash
 ufw status
 nginx -t
-curl -I http://africoin.gowinrdc.com/.well-known/acme-challenge/test
+curl -I http://africointrading.com/.well-known/acme-challenge/test
 ```
 
 **Solution:** Ensure ports 80 and 443 are open, use the bootstrap Nginx config, and rerun Certbot.
@@ -567,7 +569,7 @@ curl -I http://africoin.gowinrdc.com/.well-known/acme-challenge/test
 **Command to check:**
 
 ```bash
-curl --fail https://africoin.gowinrdc.com/api/health
+curl --fail https://africointrading.com/api/health
 tail -f /var/log/nginx/error.log
 ```
 
@@ -583,7 +585,7 @@ tail -f /var/log/nginx/error.log
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.yml logs --tail=200 app
-curl --fail https://africoin.gowinrdc.com/api/health
+curl --fail https://africointrading.com/api/health
 ```
 
 **Solution:** Keep the frontend and API on the same domain, verify the environment file, and inspect the browser Network panel for the failing `/api/trpc` request.
@@ -597,7 +599,7 @@ curl --fail https://africoin.gowinrdc.com/api/health
 **Command to check:**
 
 ```bash
-curl -I https://africoin.gowinrdc.com/api/health
+curl -I https://africointrading.com/api/health
 ```
 
 **Solution:** Prefer serving the built frontend and API from the same domain. Do not add a wildcard CORS policy for authenticated production traffic.
@@ -735,7 +737,7 @@ cd /opt/africoin
 docker compose --env-file .env -f deploy/docker-compose.yml config -q
 docker compose --env-file .env -f deploy/docker-compose.yml ps
 curl --fail http://127.0.0.1:${APP_PORT:-3000}/api/health
-curl --fail https://africoin.gowinrdc.com/api/health
+curl --fail https://africointrading.com/api/health
 certbot renew --dry-run
 ./deploy/scripts/backup.sh
 ```
