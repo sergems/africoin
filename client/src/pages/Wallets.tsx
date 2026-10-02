@@ -101,8 +101,8 @@ export default function Wallets() {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#087f78]">Portefeuille</p>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[#0a2233]">Vos liquidités, séparées par devise</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-              Les dépôts CDF et USD sont traités par Keccel KelPay sur Orange Money, M-PESA, Airtel Money et AfriMoney.
-              Le portefeuille est crédité uniquement après confirmation de la transaction par Keccel.
+              Les dépôts CDF et USD sont traités par Africoin sur Orange Money, M-PESA, Airtel Money et AfriMoney.
+              Le portefeuille est crédité uniquement après confirmation de la transaction par Africoin.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
@@ -145,9 +145,9 @@ export default function Wallets() {
             <CardHeader><CardTitle className="text-xl font-medium">Avant tout mouvement</CardTitle></CardHeader>
             <CardContent className="space-y-4 text-sm leading-6 text-slate-300">
               <div className="flex gap-3"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-[#e6b93f]" /><p>Votre identité et votre profil de risque doivent être validés avant l’accès aux mouvements financiers.</p></div>
-              <div className="flex gap-3"><Clock3 className="mt-1 h-4 w-4 shrink-0 text-[#e6b93f]" /><p>Les dépôts Keccel sont vérifiés côté serveur. Les retraits restent soumis à une décision administrative auditable.</p></div>
+              <div className="flex gap-3"><Clock3 className="mt-1 h-4 w-4 shrink-0 text-[#e6b93f]" /><p>Les dépôts Africoin sont vérifiés côté serveur. Les retraits restent soumis à une décision de l’équipe Africoin, enregistrée dans l’historique.</p></div>
               <div className="rounded-2xl border border-[#e6b93f]/20 bg-[#e6b93f]/10 p-4 text-xs text-[#f7e0a4]">
-                Vous pouvez soumettre une demande de retrait pour approbation par un Admin ou Super Admin. L’approbation ne réserve ni ne débite de fonds et n’envoie aucun transfert; le payout Keccel reste désactivé.
+                Vous pouvez soumettre une demande de retrait à l’équipe Africoin. L’approbation ne réserve ni ne débite de fonds et n’envoie aucun transfert; le payout Africoin reste désactivé.
               </div>
             </CardContent>
           </Card>
@@ -156,9 +156,9 @@ export default function Wallets() {
         <Dialog open={depositOpen} onOpenChange={open => !open && setDepositOpen(false)}>
           <DialogContent className="rounded-2xl border-[#dce4e5] bg-[#f7f7f2] text-[#0a2233] shadow-[0_24px_80px_rgba(7,26,42,.28)] sm:max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-[#0a2233]">Déposer avec Keccel KelPay</DialogTitle>
+              <DialogTitle className="text-[#0a2233]">Déposer avec Africoin</DialogTitle>
               <DialogDescription>
-                Vous recevrez une demande de validation sur votre téléphone. Aucun solde n’est crédité avant confirmation par Keccel.
+                Vous recevrez une demande de validation sur votre téléphone. Aucun solde n’est crédité avant confirmation par Africoin.
               </DialogDescription>
             </DialogHeader>
             <div className="flex gap-2">
@@ -173,11 +173,11 @@ export default function Wallets() {
             <div>
               <label htmlFor="deposit-mobile" className="text-xs font-medium text-slate-600">Numéro Mobile Money (RDC)</label>
               <Input id="deposit-mobile" type="tel" inputMode="tel" autoComplete="tel" value={mobileNumber} onChange={event => setMobileNumber(event.target.value)} placeholder="+243XXXXXXXXX" className="mt-2" />
-              <p className="mt-1 text-xs text-slate-500">Keccel KelPay prend en charge Orange Money, M-PESA, Airtel Money et AfriMoney.</p>
+              <p className="mt-1 text-xs text-slate-500">Africoin prend en charge Orange Money, M-PESA, Airtel Money et AfriMoney.</p>
             </div>
             <DialogFooter>
               <Button disabled={!validAmount || !validPhone || deposit.isPending} onClick={startDeposit} className="w-full bg-[#0a2233] text-white hover:bg-[#0d2638]">
-                {deposit.isPending ? "Envoi à Keccel…" : "Envoyer la demande de paiement"}
+                {deposit.isPending ? "Envoi à Africoin…" : "Envoyer la demande de paiement"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -187,7 +187,7 @@ export default function Wallets() {
             <DialogHeader>
               <DialogTitle className="text-[#0a2233]">Demander un retrait</DialogTitle>
               <DialogDescription>
-                Un Admin ou Super Admin doit approuver la demande. Les transferts Keccel sont désactivés : aucun fonds ne sera réservé, débité ou envoyé par cette demande.
+                L’équipe Africoin doit valider la demande. Les transferts Africoin sont désactivés : aucun fonds ne sera réservé, débité ou envoyé par cette demande.
               </DialogDescription>
             </DialogHeader>
             <div className="flex gap-2">
@@ -206,7 +206,7 @@ export default function Wallets() {
                 <option value="bank_account">Compte bancaire</option>
                 <option value="partner">Partenaire</option>
               </select>
-              <p className="mt-1 text-xs text-slate-500">Les coordonnées de paiement ne sont pas collectées tant que le payout Keccel n’est pas activé.</p>
+              <p className="mt-1 text-xs text-slate-500">Les coordonnées de paiement ne sont pas collectées tant que le payout Africoin n’est pas activé.</p>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setWithdrawalOpen(false)} className="border-slate-200">Annuler</Button>
@@ -267,10 +267,10 @@ function RequestList({ title, rows, icon, onCheck, checkingReference }: {
             {canCheck && onCheck && <Button size="sm" variant="outline" disabled={isChecking} onClick={() => onCheck(row.reference)}>{isChecking ? "Vérification…" : "Vérifier"}</Button>}
             {row.paymentProvider === "KECCEL" && row.providerStatus === "VERIFICATION_EXCEPTION" && <span className="w-full text-amber-700">Réconciliation manuelle requise ; aucun crédit effectué.</span>}
             {row.paymentProvider === "KECCEL" && row.providerStatus === "SUCCESS_COMPLIANCE_HOLD" && <span className="w-full text-amber-700">Paiement confirmé, mais fonds retenus pour revue conformité ; contactez le support.</span>}
-            {row.paymentProvider === "KECCEL" && row.providerStatus === "SUBMISSION_UNKNOWN" && !row.providerReference && !row.candidateTransactionId && <span className="w-full text-amber-700">Résultat Keccel incertain. Ne lancez pas un nouveau dépôt ; contactez le support avec cette référence.</span>}
-            {row.paymentProvider === "KECCEL" && ["processing", "pending_review"].includes(row.status) && Number(row.providerCheckCount ?? 0) >= 3 && <span className="w-full text-amber-700">Maximum de vérifications Keccel atteint ; contactez le support pour réconciliation. Aucun crédit n’a été effectué sans confirmation.</span>}
-            {row.destinationType && row.status === "pending_review" && <span className="w-full text-amber-700">En attente d’approbation Admin/Super Admin. Aucun fonds n’a été réservé ni transféré.</span>}
-            {row.destinationType && row.status === "approved_pending_payout" && <span className="w-full text-amber-700">Approuvé administrativement; aucun transfert envoyé et aucun solde modifié. Payout Keccel désactivé.</span>}
+            {row.paymentProvider === "KECCEL" && row.providerStatus === "SUBMISSION_UNKNOWN" && !row.providerReference && !row.candidateTransactionId && <span className="w-full text-amber-700">Résultat Africoin incertain. Ne lancez pas un nouveau dépôt ; contactez le support avec cette référence.</span>}
+            {row.paymentProvider === "KECCEL" && ["processing", "pending_review"].includes(row.status) && Number(row.providerCheckCount ?? 0) >= 3 && <span className="w-full text-amber-700">Maximum de vérifications Africoin atteint ; contactez le support pour réconciliation. Aucun crédit n’a été effectué sans confirmation.</span>}
+            {row.destinationType && row.status === "pending_review" && <span className="w-full text-amber-700">En attente de validation par Africoin. Aucun fonds n’a été réservé ni transféré.</span>}
+            {row.destinationType && row.status === "approved_pending_payout" && <span className="w-full text-amber-700">Validé par Africoin; aucun transfert envoyé et aucun solde modifié. Les transferts Africoin restent désactivés.</span>}
           </div>
         );
       }) : <p className="mt-3 text-xs text-slate-400">Aucune demande enregistrée.</p>}
@@ -284,7 +284,7 @@ function statusLabel(status: string, isWithdrawal = false) {
   switch (status) {
     case "completed": return "Confirmé";
     case "failed": return isWithdrawal ? "Échec de la demande" : "Échoué";
-    case "rejected": return isWithdrawal ? "Refusé par l’administration" : "Refusé";
+    case "rejected": return isWithdrawal ? "Refusé par Africoin" : "Refusé";
     case "processing": return "En cours";
     case "pending_review": return "À vérifier";
     case "requested": return "Soumis";

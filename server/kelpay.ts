@@ -40,7 +40,7 @@ export class KelpayConfigurationError extends Error {
 }
 
 export class KelpayTransportError extends Error {
-  constructor(message = "Keccel could not be reached or returned an invalid response.") {
+  constructor(message = "Africoin could not be reached or returned an invalid response.") {
     super(message);
     this.name = "KelpayTransportError";
   }
@@ -50,7 +50,7 @@ function readCredentials() {
   const token = process.env.KECCEL_API_TOKEN?.trim();
   const merchantCode = process.env.KECCEL_MERCHANT_CODE?.trim();
   if (!token || !merchantCode) {
-    throw new KelpayConfigurationError("Keccel merchant credentials are not configured.");
+    throw new KelpayConfigurationError("Africoin merchant credentials are not configured.");
   }
   return { token, merchantCode };
 }
@@ -58,13 +58,13 @@ function readCredentials() {
 function readCallbackUrl() {
   const value = process.env.KECCEL_CALLBACK_URL?.trim();
   if (!value) {
-    throw new KelpayConfigurationError("The public HTTPS Keccel callback URL is not configured.");
+    throw new KelpayConfigurationError("The public HTTPS Africoin callback URL is not configured.");
   }
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new KelpayConfigurationError("The Keccel callback URL is invalid.");
+    throw new KelpayConfigurationError("The Africoin callback URL is invalid.");
   }
   if (
     url.protocol !== "https:" ||
@@ -77,7 +77,7 @@ function readCallbackUrl() {
     url.hostname === "localhost" ||
     url.hostname.endsWith(".localhost")
   ) {
-    throw new KelpayConfigurationError(`The Keccel callback URL must be HTTPS and end with ${KELPAY_CALLBACK_PATH}.`);
+    throw new KelpayConfigurationError(`The Africoin callback URL must be HTTPS and end with ${KELPAY_CALLBACK_PATH}.`);
   }
   return url.toString();
 }
@@ -100,7 +100,7 @@ function responseCode(value: unknown): number | null {
 
 function responseText(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
-  const sanitized = value.replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  const sanitized = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\bkeccel\b/gi, "Africoin").trim();
   return sanitized ? sanitized.slice(0, 400) : fallback;
 }
 
@@ -161,19 +161,19 @@ export async function submitKelpayPayin(input: {
     });
   } catch (error) {
     if (error instanceof KelpayConfigurationError) throw error;
-    return { kind: "uncertain", transactionId: null, description: "Keccel did not return a confirmed response. Check the transaction status before retrying." };
+    return { kind: "uncertain", transactionId: null, description: "Africoin did not return a confirmed response. Check the transaction status before retrying." };
   }
 
   const code = responseCode(payload.code);
   const returnedReference = typeof payload.reference === "string" ? payload.reference.trim() : "";
   const id = transactionId(payload.transactionid);
-  const description = responseText(payload.description, "Keccel returned no description.");
+  const description = responseText(payload.description, "Africoin returned no description.");
   if (returnedReference !== input.reference) {
-    return { kind: "uncertain", transactionId: id, description: "Keccel returned a reference that does not match this deposit." };
+    return { kind: "uncertain", transactionId: id, description: "Africoin returned a reference that does not match this deposit." };
   }
   if (code === 0 && id) return { kind: "accepted", transactionId: id, description };
   if (code === 1) return { kind: "rejected", transactionId: id, description };
-  return { kind: "uncertain", transactionId: id, description: "Keccel returned an incomplete or unrecognized payment response." };
+  return { kind: "uncertain", transactionId: id, description: "Africoin returned an incomplete or unrecognized payment response." };
 }
 
 export async function checkKelpayTransaction(input: {
@@ -215,13 +215,13 @@ export function classifyKelpayCheckResponse(
     return {
       kind: "exception",
       providerStatus: "VERIFICATION_EXCEPTION",
-      description: "Keccel status details did not match the original merchant, reference, amount or currency.",
+      description: "Africoin status details did not match the original merchant, reference, amount or currency.",
     };
   }
 
   const code = responseCode(payload.code);
   const status = typeof payload.transactionstatus === "string" ? payload.transactionstatus.trim().toUpperCase() : "";
-  const description = responseText(payload.description, `Keccel transaction status: ${status || "unknown"}.`);
+  const description = responseText(payload.description, `Africoin transaction status: ${status || "unknown"}.`);
 
   const verifiedTransactionId = returnedTransactionId as string;
   if (code === 0 && status === "SUCCESS") return { kind: "success", transactionId: verifiedTransactionId, providerStatus: "SUCCESS", description };
@@ -233,7 +233,7 @@ export function classifyKelpayCheckResponse(
     kind: "exception",
     transactionId: verifiedTransactionId,
     providerStatus: "VERIFICATION_EXCEPTION",
-    description: "Keccel returned an unrecognized or contradictory final transaction status.",
+    description: "Africoin returned an unrecognized or contradictory final transaction status.",
   };
 }
 
@@ -245,15 +245,15 @@ async function currentDeposit(reference: string) {
 }
 
 function depositMessage(status: string, providerStatus: string | null | undefined) {
-  if (status === "completed") return "Keccel a confirmé le paiement et le portefeuille a été crédité.";
-  if (status === "failed") return "Keccel a confirmé l’échec du paiement. Aucun fonds n’a été crédité.";
-  if (providerStatus === "SUCCESS_COMPLIANCE_HOLD") return "Keccel a confirmé le paiement, mais votre compte nécessite une revue de conformité. Aucun fonds n’a été crédité.";
+  if (status === "completed") return "Africoin a confirmé le paiement et le portefeuille a été crédité.";
+  if (status === "failed") return "Africoin a confirmé l’échec du paiement. Aucun fonds n’a été crédité.";
+  if (providerStatus === "SUCCESS_COMPLIANCE_HOLD") return "Africoin a confirmé le paiement, mais votre compte nécessite une revue de conformité. Aucun fonds n’a été crédité.";
   if (providerStatus === "SUBMISSION_UNKNOWN" || providerStatus === "STATUS_CHECK_UNAVAILABLE") {
     return "Le résultat du paiement n’est pas encore confirmé. Vérifiez son statut avant de créer un autre paiement.";
   }
-  if (providerStatus === "VERIFICATION_EXCEPTION") return "La réponse de Keccel nécessite une réconciliation manuelle. Aucun fonds n’a été crédité.";
+  if (providerStatus === "VERIFICATION_EXCEPTION") return "La réponse de Africoin nécessite une réconciliation manuelle. Aucun fonds n’a été crédité.";
   if (providerStatus === "REQUEST_ACCEPTED" || providerStatus === "PENDING" || providerStatus === "PROCESSING" || providerStatus === "INITIATED") {
-    return "Demande envoyée. Confirmez-la sur votre téléphone ; le portefeuille sera crédité après confirmation de Keccel.";
+    return "Demande envoyée. Confirmez-la sur votre téléphone ; le portefeuille sera crédité après confirmation par Africoin.";
   }
   return "Le statut du paiement est en cours de vérification. Le portefeuille n’a pas encore été crédité.";
 }
@@ -351,7 +351,7 @@ async function applyKelpayOutcome(reference: string, outcome: KelpayOutcome) {
       failed = true;
       await tx.update(reconciliationRecords).set({ status: "exception", providerReference: outcome.transactionId, reviewNote: outcome.description }).where(eq(reconciliationRecords.requestReference, row.reference));
       await tx.insert(reconciliationHistory).values({ requestReference: row.reference, entityType: "deposit", expectedAmount: row.amount, currency: row.currency, status: "exception", providerReference: outcome.transactionId, reviewNote: outcome.description });
-      await tx.insert(notifications).values({ userId: row.userId, type: "deposit", title: "Paiement Keccel échoué", message: `${row.reference} · aucun fonds n’a été crédité.` });
+      await tx.insert(notifications).values({ userId: row.userId, type: "deposit", title: "Paiement Africoin échoué", message: `${row.reference} · aucun fonds n’a été crédité.` });
     });
     if (failed) await writeAuditLog({ actorUserId: row.userId, action: "deposit.keccel_failed", entityType: "deposit_request", entityId: row.reference, severity: "warning", metadata: { providerStatus: outcome.providerStatus } });
     const latest = await currentDeposit(reference);
@@ -360,7 +360,7 @@ async function applyKelpayOutcome(reference: string, outcome: KelpayOutcome) {
 
   let credited = false;
   let complianceHeld = false;
-  const complianceHoldNote = "Keccel confirmed the payment, but the account no longer meets the current KYC/risk settlement policy; funds are held for manual compliance review.";
+  const complianceHoldNote = "Africoin confirmed the payment, but the account no longer meets the current KYC/risk settlement policy; funds are held for manual compliance review.";
   await db.transaction(async tx => {
     const account = (await tx.select({ id: users.id }).from(users).where(eq(users.id, row.userId)).for("update"))[0];
     const kyc = (await tx.select().from(kycCases).where(eq(kycCases.userId, row.userId)).orderBy(desc(kycCases.updatedAt)).limit(1).for("update"))[0];
@@ -400,7 +400,7 @@ async function applyKelpayOutcome(reference: string, outcome: KelpayOutcome) {
       status: "completed",
       reference: row.reference,
       providerReference,
-      description: "Dépôt mobile money confirmé par Keccel KelPay",
+      description: "Dépôt mobile money confirmé par Africoin KelPay",
       completedAt: new Date(),
     });
     await tx.update(reconciliationRecords).set({
@@ -542,7 +542,7 @@ async function checkAndApplyKelpayStatus(reference: string, callbackTransactionI
   try {
     payload = await checkKelpayTransaction({ transactionId: id });
   } catch {
-    await db.update(depositRequests).set({ providerStatus: "STATUS_CHECK_UNAVAILABLE", complianceNote: "Keccel status check could not be completed. Do not create a duplicate payment." }).where(and(eq(depositRequests.id, row.id), inArray(depositRequests.status, ["processing", "pending_review"])));
+    await db.update(depositRequests).set({ providerStatus: "STATUS_CHECK_UNAVAILABLE", complianceNote: "Africoin status check could not be completed. Do not create a duplicate payment." }).where(and(eq(depositRequests.id, row.id), inArray(depositRequests.status, ["processing", "pending_review"])));
     return { retry: true as const };
   }
 

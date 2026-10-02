@@ -23,7 +23,7 @@ function providerResult(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("Keccel KelPay status verification", () => {
+describe("Africoin deposit status verification", () => {
   it("accepts only a matching successful CheckTransaction response", () => {
     expect(classifyKelpayCheckResponse(providerResult(), expected)).toMatchObject({
       kind: "success",
@@ -81,7 +81,7 @@ describe("Keccel KelPay status verification", () => {
     expect(toKelpayClientStatus({ status: "processing", providerStatus: "REQUEST_ACCEPTED", providerCheckCount: 2, providerReference: expected.transactionId })).toMatchObject({
       statusChecksRemaining: 1,
       canCheckStatus: true,
-      message: expect.stringContaining("Keccel"),
+      message: expect.stringContaining("Africoin"),
     });
     expect(toKelpayClientStatus({ status: "processing", providerStatus: "REQUEST_ACCEPTED", providerCheckCount: 3, providerReference: expected.transactionId }).canCheckStatus).toBe(false);
   });

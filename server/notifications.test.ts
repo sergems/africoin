@@ -37,7 +37,7 @@ describe("notifications", () => {
   it("builds decision notifications with the request reference and reviewer note", () => {
     expect(buildFundingDecisionNotification({ userId: 41, type: "deposit", decision: "approve", reference: "DEP-ABC123", note: "KYC validé" })).toEqual({ userId: 41, type: "deposit", title: "Demande approuvée", message: "DEP-ABC123 · KYC validé" });
     expect(buildFundingDecisionNotification({ userId: 42, type: "withdrawal", decision: "reject", reference: "WDL-XYZ789", note: "Justificatif requis" })).toEqual({ userId: 42, type: "withdrawal", title: "Demande rejetée", message: "WDL-XYZ789 · Justificatif requis" });
-    expect(buildFundingDecisionNotification({ userId: 43, type: "withdrawal", decision: "approve", reference: "WDL-APPROVED", note: "Contrôle terminé" })).toMatchObject({ title: "Retrait approuvé · transfert non envoyé", message: expect.stringContaining("payout Keccel reste désactivé") });
+    expect(buildFundingDecisionNotification({ userId: 43, type: "withdrawal", decision: "approve", reference: "WDL-APPROVED", note: "Contrôle terminé" })).toMatchObject({ title: "Retrait approuvé · transfert non envoyé", message: expect.stringContaining("payout Africoin reste désactivé") });
   });
 
   it("notifies a user that a withdrawal is awaiting approval without reserving or transferring funds", () => {

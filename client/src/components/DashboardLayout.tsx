@@ -22,7 +22,7 @@ const menuItems = [
   { icon: FileText, label: "Documents", path: "/documents" },
   { icon: UserRound, label: "Profil", path: "/settings" },
   { icon: ShieldCheck, label: "Conformité", path: "/compliance", restricted: true },
-  { icon: ShieldCheck, label: "Administration", path: "/admin", adminOnly: true },
+  { icon: ShieldCheck, label: "Africoin", path: "/admin", adminOnly: true },
   { icon: UsersRound, label: "Utilisateurs", path: "/admin/users", adminOnly: true },
   { icon: Settings2, label: "Instruments & taux", path: "/admin/markets", adminOnly: true },
   { icon: Gavel, label: "Permissions & approbations", path: "/admin/permissions", governance: true },

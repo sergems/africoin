@@ -26,7 +26,7 @@ export interface CustodyProvider {
 }
 
 export const providerRegistry: ProviderStatus[] = [
-  { name: "Keccel KelPay (dépôts)", category: "payments", mode: "pending_activation", connected: false, activationRequirements: ["Identifiants Keccel", "URL publique HTTPS du callback", "Guide de payout pour les retraits"] },
+  { name: "Africoin (dépôts)", category: "payments", mode: "pending_activation", connected: false, activationRequirements: ["Identifiants de paiement Africoin", "URL publique HTTPS du callback", "Guide de payout pour les retraits"] },
   { name: "Africoin Internal Broker", category: "brokerage", mode: "live", connected: true, activationRequirements: [] },
   { name: "Fournisseur FX", category: "fx", mode: "pending_activation", connected: false, activationRequirements: ["Accord de liquidité", "Cadre de change validé", "Limites de risque", "Webhooks de statut"] },
   { name: "Dépositaire / custody", category: "custody", mode: "pending_activation", connected: false, activationRequirements: ["Convention de conservation", "Mapping des comptes", "Réconciliation quotidienne"] },
@@ -35,16 +35,16 @@ export const providerRegistry: ProviderStatus[] = [
 
 export function getProviderRegistry() {
   const keccelReady = Boolean(process.env.KECCEL_API_TOKEN?.trim() && process.env.KECCEL_MERCHANT_CODE?.trim() && process.env.KECCEL_CALLBACK_URL?.trim());
-  return providerRegistry.map(provider => provider.name === "Keccel KelPay (dépôts)"
+  return providerRegistry.map(provider => provider.name === "Africoin (dépôts)"
     ? {
         ...provider,
         mode: keccelReady ? "live" as const : "pending_activation" as const,
         connected: keccelReady,
         activationRequirements: [
-          ...(!process.env.KECCEL_API_TOKEN?.trim() ? ["Jeton API Keccel"] : []),
-          ...(!process.env.KECCEL_MERCHANT_CODE?.trim() ? ["Code marchand Keccel"] : []),
+          ...(!process.env.KECCEL_API_TOKEN?.trim() ? ["Identifiants API Africoin"] : []),
+          ...(!process.env.KECCEL_MERCHANT_CODE?.trim() ? ["Code marchand Africoin"] : []),
           ...(!process.env.KECCEL_CALLBACK_URL?.trim() ? ["URL HTTPS publique du callback"] : []),
-          "Guide Keccel de payout pour activer les retraits",
+          "Guide Africoin de paiement pour activer les retraits",
         ],
       }
     : { ...provider, activationRequirements: [...provider.activationRequirements] });

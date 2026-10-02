@@ -41,7 +41,7 @@ export async function createWithdrawalRequest(input: {
     eq(withdrawalRequests.userId, input.userId),
   )).limit(1))[0];
   if (existing) {
-    return { reference, status: existing.status, message: "Cette demande existe déjà; elle reste soumise à l’approbation administrative." };
+    return { reference, status: existing.status, message: "Cette demande existe déjà; elle reste soumise à l’validation Africoin." };
   }
 
   const initialRiskLimit = await getOrCreateRiskLimit(input.userId);
@@ -104,7 +104,7 @@ export async function createWithdrawalRequest(input: {
       destinationType: input.destinationType,
       status: "pending_review",
       reference,
-      complianceNote: "En attente d’approbation administrative; aucun fonds n’est réservé et aucun payout n’est envoyé.",
+      complianceNote: "En attente d’validation Africoin; aucun fonds n’est réservé et aucun payout n’est envoyé.",
     });
     await tx.insert(reconciliationRecords).values({
       requestReference: reference,
@@ -112,7 +112,7 @@ export async function createWithdrawalRequest(input: {
       expectedAmount: amount.toFixed(8),
       currency: input.currency,
       status: "unmatched",
-      reviewNote: "Retrait soumis; approbation administrative requise. Aucun payout soumis.",
+      reviewNote: "Retrait soumis; validation Africoin requise. Aucun payout soumis.",
     });
     await tx.insert(reconciliationHistory).values({
       requestReference: reference,
@@ -120,7 +120,7 @@ export async function createWithdrawalRequest(input: {
       expectedAmount: amount.toFixed(8),
       currency: input.currency,
       status: "unmatched",
-      reviewNote: "Retrait soumis; en attente d’approbation administrative. Aucun solde modifié.",
+      reviewNote: "Retrait soumis; en attente d’validation Africoin. Aucun solde modifié.",
     });
     await tx.insert(notifications).values(buildWithdrawalRequestNotification({
       userId: input.userId,
@@ -132,7 +132,7 @@ export async function createWithdrawalRequest(input: {
   });
 
   if (outcome.existing) {
-    return { reference, status: outcome.existing.status, message: "Cette demande existe déjà; elle reste soumise à l’approbation administrative." };
+    return { reference, status: outcome.existing.status, message: "Cette demande existe déjà; elle reste soumise à l’validation Africoin." };
   }
 
   await writeAuditLog({
@@ -146,7 +146,7 @@ export async function createWithdrawalRequest(input: {
   const response = {
     reference,
     status: "pending_review" as const,
-    message: "Demande enregistrée en attente d’approbation d’un administrateur ou Super Admin. Aucun fonds n’a été réservé ni transféré.",
+    message: "Demande enregistrée en attente d’validation par Africoin. Aucun fonds n’a été réservé ni transféré.",
   };
   if (input.idempotencyKey) await saveIdempotentResponse(input.userId, input.idempotencyKey, "wallet.withdrawal", response);
   return response;
@@ -175,7 +175,7 @@ export async function decideWithdrawalRequest(input: {
 
     const status = resolveWithdrawalDecisionStatus(input.decision);
     const systemNote = input.decision === "approve"
-      ? `${input.note}\nApprobation administrative enregistrée. Aucun fonds n’a été réservé ni transféré; le payout Keccel reste désactivé.`
+      ? `${input.note}\nValidation Africoin enregistrée. Aucun fonds n’a été réservé ni transféré; le payout Africoin reste désactivé.`
       : input.note;
     const changed = await tx.update(withdrawalRequests).set({
       status,
@@ -189,7 +189,7 @@ export async function decideWithdrawalRequest(input: {
 
     const reconciliationStatus = input.decision === "approve" ? "unmatched" as const : "exception" as const;
     const reconciliationNote = input.decision === "approve"
-      ? "Approbation administrative uniquement; aucun payout envoyé, aucun solde réservé ou modifié."
+      ? "Validation Africoin uniquement; aucun payout envoyé, aucun solde réservé ou modifié."
       : input.note;
     await tx.update(reconciliationRecords).set({
       status: reconciliationStatus,

@@ -85,7 +85,7 @@ export async function getAdminUserDetail(userId: number) {
 }
 
 export async function updateAdminUserStatus(input: { actorUserId: number; targetUserId: number; status: AdminUserStatus; reason: string }) {
-  if (!canChangeUserStatus(input.actorUserId, input.targetUserId, input.status)) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas se bloquer lui-même." });
+  if (!canChangeUserStatus(input.actorUserId, input.targetUserId, input.status)) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas vous bloquer vous-même." });
   const db = await getDb();
   const target = db ? (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0] : undefined;
   if (db && !target) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable." });
@@ -99,11 +99,11 @@ export async function updateAdminUserStatus(input: { actorUserId: number; target
 }
 
 export async function updateAdminUserRole(input: { actorUserId: number; targetUserId: number; role: AdminUserRole; reason: string }) {
-  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas modifier son propre rôle." });
+  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas modifier votre propre compte avec cette action." });
   const db = await getDb();
   const current = db ? (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0] : undefined;
   if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable." });
-  if (!canChangeUserRole(input.actorUserId, input.targetUserId, current.role, input.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas modifier son propre rôle." });
+  if (!canChangeUserRole(input.actorUserId, input.targetUserId, current.role, input.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas modifier votre propre compte avec cette action." });
   if (db) await db.update(users).set({ role: input.role }).where(eq(users.id, input.targetUserId));
   await writeAuditLog({ ...buildUserAdminAudit("admin.user_role_updated", input.targetUserId, input.reason, current.role, input.role), actorUserId: input.actorUserId });
   return { success: true, role: input.role };
@@ -111,7 +111,7 @@ export async function updateAdminUserRole(input: { actorUserId: number; targetUs
 
 export async function requestAdminUserStatus(input: { actorUserId: number; targetUserId: number; status: AdminUserStatus; reason: string }) {
   if (!canChangeUserStatus(input.actorUserId, input.targetUserId, input.status)) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas se bloquer lui-même." });
+    throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas vous bloquer vous-même." });
   }
   const db = await getDb();
   if (db) {
@@ -122,7 +122,7 @@ export async function requestAdminUserStatus(input: { actorUserId: number; targe
 }
 
 export async function setSuperAdminUserStatus(input: { actorUserId: number; targetUserId: number; status: AdminUserStatus; reason: string }) {
-  if (!canChangeUserStatus(input.actorUserId, input.targetUserId, input.status)) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas se suspendre lui-même." });
+  if (!canChangeUserStatus(input.actorUserId, input.targetUserId, input.status)) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas vous bloquer vous-même." });
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour modifier le statut." });
   const target = (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0];
@@ -136,7 +136,7 @@ export async function setSuperAdminUserStatus(input: { actorUserId: number; targ
 
 export async function createAdminAccount(input: { actorUserId: number; name: string; email: string; password: string; reason: string }) {
   const db = await getDb();
-  if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour créer un administrateur." });
+  if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour créer ce compte Africoin." });
   const email = normalizeEmail(input.email);
   const existing = (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
   if (existing) throw new TRPCError({ code: "CONFLICT", message: "Cette adresse email est déjà utilisée." });
@@ -159,7 +159,7 @@ export async function createAdminAccount(input: { actorUserId: number; name: str
 }
 
 export async function requestAdminUserRole(input: { actorUserId: number; targetUserId: number; role: AdminUserRole; reason: string }) {
-  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas modifier son propre rôle." });
+  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas modifier votre propre compte avec cette action." });
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable." });
   const target = (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0];
@@ -184,7 +184,7 @@ export async function reviewAdminUserKyc(input: { actorUserId: number; targetUse
 }
 
 export async function updateAdminUserAccount(input: { actorUserId: number; targetUserId: number; name: string; email: string; reason: string }) {
-  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas modifier son propre compte depuis cette console." });
+  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas modifier votre propre compte depuis cet espace." });
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour modifier un compte." });
   const target = (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0];
@@ -201,12 +201,12 @@ export async function updateAdminUserAccount(input: { actorUserId: number; targe
 }
 
 export async function deleteAdminUser(input: { actorUserId: number; targetUserId: number; reason: string }) {
-  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas supprimer son propre compte." });
+  if (input.actorUserId === input.targetUserId) throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas supprimer votre propre compte." });
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour supprimer un compte." });
   const target = (await db.select().from(users).where(eq(users.id, input.targetUserId)).limit(1))[0];
   if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "Utilisateur introuvable." });
-  if (target.role === "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "La suppression d’un compte Super Admin est désactivée." });
+  if (target.role === "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "La suppression de ce compte Africoin est désactivée." });
   await db.transaction(async tx => {
     const userWallets = await tx.select({ id: wallets.id }).from(wallets).where(eq(wallets.userId, input.targetUserId));
     const walletIds = userWallets.map(wallet => wallet.id);

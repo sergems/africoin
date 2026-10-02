@@ -12,7 +12,7 @@ describe("platform safety controls", () => {
     const providers = getProviderRegistry();
     expect(providers.length).toBeGreaterThanOrEqual(5);
     expect(providers.find(provider => provider.name === "Africoin Internal Broker")).toMatchObject({ category: "brokerage", mode: "live", connected: true });
-    expect(providers.find(provider => provider.name === "Keccel KelPay (dépôts)")?.category).toBe("payments");
+    expect(providers.find(provider => provider.name === "Africoin (dépôts)")?.category).toBe("payments");
     expect(providers.filter(provider => provider.name !== "Africoin Internal Broker" && provider.category !== "payments").every(provider => provider.mode === "pending_activation" && provider.connected === false)).toBe(true);
   });
 

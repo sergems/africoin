@@ -340,7 +340,7 @@ export const appRouter = router({
       try {
         assertKelpayPayinConfigured();
       } catch (error) {
-        if (error instanceof KelpayConfigurationError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Keccel KelPay n’est pas configuré. Contactez l’administrateur." });
+        if (error instanceof KelpayConfigurationError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Le service de dépôt Africoin n’est pas configuré. Contactez l’équipe Africoin." });
         throw error;
       }
       const reference = input.idempotencyKey
@@ -377,8 +377,8 @@ export const appRouter = router({
 
           await tx.insert(depositRequests).values({ userId: ctx.user.id, walletId: wallet.id, amount: input.amount.toFixed(8), currency: input.currency, method: "mobile_money", reference, status: "processing", paymentProvider: "KECCEL", providerStatus: "SUBMITTING", providerCheckCount: 0, statusCheckNotBefore: new Date(Date.now() + 5_000) });
           await tx.insert(reconciliationRecords).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched" });
-          await tx.insert(reconciliationHistory).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched", reviewNote: "Keccel KelPay mobile-money request created." });
-          await tx.insert(notifications).values({ userId: ctx.user.id, type: "deposit", title: "Demande Keccel créée", message: `${input.amount.toFixed(2)} ${input.currency} · ${reference}` });
+          await tx.insert(reconciliationHistory).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched", reviewNote: "Africoin KelPay mobile-money request created." });
+          await tx.insert(notifications).values({ userId: ctx.user.id, type: "deposit", title: "Demande Africoin créée", message: `${input.amount.toFixed(2)} ${input.currency} · ${reference}` });
           return null;
         });
       } catch (error) {
@@ -401,7 +401,7 @@ export const appRouter = router({
         eq(depositRequests.userId, ctx.user.id),
         eq(depositRequests.paymentProvider, "KECCEL"),
       )).limit(1))[0];
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Dépôt Keccel introuvable." });
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Dépôt Africoin introuvable." });
       return {
         reference: row.reference,
         amount: row.amount,
@@ -412,7 +412,7 @@ export const appRouter = router({
     }),
     refreshKelpayStatus: protectedProcedure.input(z.object({ reference: z.string().min(8).max(120) })).mutation(async ({ ctx, input }) => {
       const result = await refreshKelpayDepositStatus({ userId: ctx.user.id, reference: input.reference });
-      if (!result || !("message" in result)) throw new TRPCError({ code: "NOT_FOUND", message: "Dépôt Keccel introuvable." });
+      if (!result || !("message" in result)) throw new TRPCError({ code: "NOT_FOUND", message: "Dépôt Africoin introuvable." });
       return result;
     }),
     requestWithdrawal: protectedProcedure
@@ -477,7 +477,7 @@ export const appRouter = router({
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour décider un financement." });
       const row = (await db.select().from(depositRequests).where(eq(depositRequests.id, input.id)).limit(1))[0];
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Demande introuvable." });
-      if (row.paymentProvider === "KECCEL") throw new TRPCError({ code: "BAD_REQUEST", message: "Un dépôt Keccel ne peut être réglé manuellement. Il faut vérifier sa transaction auprès du fournisseur." });
+      if (row.paymentProvider === "KECCEL") throw new TRPCError({ code: "BAD_REQUEST", message: "Un dépôt Africoin ne peut être réglé manuellement. Il faut vérifier sa transaction auprès du fournisseur." });
       if (!["requested", "pending_review", "processing"].includes(row.status)) throw new TRPCError({ code: "BAD_REQUEST", message: "Cette demande a déjà été traitée." });
       const settledAmount = input.settledAmount ?? Number(row.amount);
       const status = input.decision === "approve" ? "completed" as const : "rejected" as const;
@@ -492,7 +492,7 @@ export const appRouter = router({
         await tx.insert(reconciliationHistory).values({ requestReference: row.reference, entityType: "deposit", expectedAmount: row.amount, settledAmount: input.decision === "approve" ? settledAmount.toFixed(8) : undefined, currency: row.currency, status: reconciliationStatus, providerReference: input.providerReference, reviewNote: input.note, reviewedBy: ctx.user.id });
         if (input.decision === "approve") {
           await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} + ${settledAmount}` }).where(eq(wallets.id, row.walletId));
-          await tx.insert(walletTransactions).values({ walletId: row.walletId, userId: row.userId, type: "deposit", direction: "credit", amount: settledAmount.toFixed(8), currency: row.currency, status: "completed", reference: row.reference, providerReference: input.providerReference, description: "Dépôt approuvé par l’administration", completedAt: new Date() });
+          await tx.insert(walletTransactions).values({ walletId: row.walletId, userId: row.userId, type: "deposit", direction: "credit", amount: settledAmount.toFixed(8), currency: row.currency, status: "completed", reference: row.reference, providerReference: input.providerReference, description: "Dépôt approuvé par Africoin", completedAt: new Date() });
         }
         await tx.insert(notifications).values(buildFundingDecisionNotification({ userId: row.userId, type: "deposit", decision: input.decision, reference: row.reference, note: input.note }));
       });
@@ -505,9 +505,9 @@ export const appRouter = router({
     detail: adminProcedure.input(z.object({ userId: z.number().int().positive() })).query(({ input }) => getAdminUserDetail(input.userId)),
     reviewKyc: permissionProcedure("kyc.review").input(z.object({ userId: z.number().int().positive(), status: z.enum(["approved", "rejected", "needs_action"]), note: z.string().trim().min(3).max(500) })).mutation(({ ctx, input }) => reviewAdminUserKyc({ actorUserId: ctx.user.id, targetUserId: input.userId, status: input.status, note: input.note })),
     updateStatus: permissionProcedure("user.status").input(z.object({ userId: z.number().int().positive(), status: z.enum(["active", "restricted", "blocked"]), reason: z.string().min(5).max(500) })).mutation(({ ctx, input }) => requestAdminUserStatus({ actorUserId: ctx.user.id, targetUserId: input.userId, status: input.status, reason: input.reason })),
-    setStatusDirect: adminProcedure.input(z.object({ userId: z.number().int().positive(), status: z.enum(["active", "restricted", "blocked"]), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => { if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Seul le Super Admin peut modifier directement le statut d’un utilisateur." }); return setSuperAdminUserStatus({ actorUserId: ctx.user.id, targetUserId: input.userId, status: input.status, reason: input.reason }); }),
+    setStatusDirect: adminProcedure.input(z.object({ userId: z.number().int().positive(), status: z.enum(["active", "restricted", "blocked"]), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => { if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Cette action est réservée à l’équipe Africoin." }); return setSuperAdminUserStatus({ actorUserId: ctx.user.id, targetUserId: input.userId, status: input.status, reason: input.reason }); }),
     updateRole: permissionProcedure("user.role").input(z.object({ userId: z.number().int().positive(), role: z.enum(["user", "compliance", "admin", "super_admin"]), reason: z.string().min(5).max(500) })).mutation(({ ctx, input }) => requestAdminUserRole({ actorUserId: ctx.user.id, targetUserId: input.userId, role: input.role, reason: input.reason })),
-    createAdmin: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(160), email: z.string().trim().email().max(320), password: z.string().min(12).max(256), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => { if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Seul le Super Admin peut créer un administrateur." }); return createAdminAccount({ actorUserId: ctx.user.id, name: input.name, email: input.email, password: input.password, reason: input.reason }); }),
+    createAdmin: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(160), email: z.string().trim().email().max(320), password: z.string().min(12).max(256), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => { if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Cette action est réservée à l’équipe Africoin." }); return createAdminAccount({ actorUserId: ctx.user.id, name: input.name, email: input.email, password: input.password, reason: input.reason }); }),
     updateAccount: permissionProcedure("system.manage").input(z.object({ userId: z.number().int().positive(), name: z.string().trim().min(2).max(160), email: z.string().trim().email().max(320), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => updateAdminUserAccount({ actorUserId: ctx.user.id, targetUserId: input.userId, name: input.name, email: input.email, reason: input.reason })),
     deleteAccount: permissionProcedure("system.manage").input(z.object({ userId: z.number().int().positive(), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => deleteAdminUser({ actorUserId: ctx.user.id, targetUserId: input.userId, reason: input.reason })),
     adjustWallet: permissionProcedure("system.manage").input(z.object({ userId: z.number().int().positive(), currency: z.enum(["CDF", "USD"]), direction: z.enum(["credit", "debit"]), amount: z.number().positive().max(1000000000000), reason: z.string().trim().min(5).max(500) })).mutation(({ ctx, input }) => adjustAdminUserWallet({ actorUserId: ctx.user.id, targetUserId: input.userId, currency: input.currency, direction: input.direction, amount: input.amount, reason: input.reason })),
@@ -525,7 +525,7 @@ export const appRouter = router({
       return rows.length ? rows : pendingActivationInstruments;
     }),
     createInstrument: adminProcedure.input(z.object({ symbol: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{3,16}$/), name: z.string().trim().min(3).max(160), assetClass: z.enum(["fx_spot", "index"]), exchange: z.string().trim().min(2).max(80), baseCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/), quoteCurrency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/), price: z.number().positive().max(1000000000000), changePercent: z.number().min(-100).max(100).optional() })).mutation(async ({ ctx, input }) => {
-      if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Seul le super administrateur peut créer un nouvel instrument." });
+      if (ctx.user.role !== "super_admin") throw new TRPCError({ code: "FORBIDDEN", message: "Cette action est réservée à l’équipe Africoin." });
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour créer un instrument." });
       const existing = (await db.select().from(instruments).where(eq(instruments.symbol, input.symbol)).limit(1))[0];
@@ -537,7 +537,7 @@ export const appRouter = router({
     }),
     updateRate: adminProcedure.input(z.object({ instrumentId: z.number().int().positive(), price: z.number().positive().max(1000000000000), changePercent: z.number().min(-100).max(100).optional(), status: z.enum(["active", "disabled", "pending_approval"]).optional(), note: z.string().trim().min(3).max(300) })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour modifier un taux administré." });
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour modifier un taux suivi par Africoin." });
       const current = (await db.select().from(instruments).where(eq(instruments.id, input.instrumentId)).limit(1))[0];
       if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "Instrument introuvable." });
       await db.update(instruments).set({ price: input.price.toFixed(8), changePercent: input.changePercent?.toFixed(4) ?? current.changePercent, status: input.status ?? current.status }).where(eq(instruments.id, input.instrumentId));

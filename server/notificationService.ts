@@ -14,7 +14,7 @@ export function buildFundingDecisionNotification(input: {
       userId: input.userId,
       type: "withdrawal",
       title: "Retrait approuvé · transfert non envoyé",
-      message: `${input.reference} · ${input.note} Aucun fonds n’a été réservé ou transféré; le payout Keccel reste désactivé.`,
+      message: `${input.reference} · ${input.note} Aucun fonds n’a été réservé ou transféré; le payout Africoin reste désactivé.`,
     };
   }
   return {

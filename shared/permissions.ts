@@ -24,14 +24,14 @@ export function hasPermission(role: PlatformRole, permission: Permission) {
 }
 
 export function roleLabel(role: PlatformRole) {
-  return { user: "Client", compliance: "Conformité", admin: "Admin", super_admin: "Super Admin" }[role];
+  return { user: "Client", compliance: "Conformité", admin: "Équipe Africoin", super_admin: "Équipe Africoin" }[role];
 }
 
 export function roleScope(role: PlatformRole) {
   return {
     user: "Portail personnel",
     compliance: "KYC, alertes, limites et audit",
-    admin: "Financement, comptes et audit",
-    super_admin: "Contrôle complet et gestion des rôles",
+    admin: "Équipe Africoin",
+    super_admin: "Équipe Africoin",
   }[role];
 }

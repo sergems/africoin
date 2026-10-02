@@ -126,12 +126,12 @@ export default function PaymentSuccess() {
                   <Detail label="Montant" value={`${formattedAmount} ${result.currency}`} />
                   <Detail label="Référence Africoin" value={result.reference} mono />
                   <Detail label="Demandé le" value={formattedDate} />
-                  <Detail label="Fournisseur" value="Keccel KelPay" />
+                  <Detail label="Fournisseur" value="Africoin" />
                 </div>
 
                 {result.status === "processing" && result.providerStatus !== "SUCCESS_COMPLIANCE_HOLD" && result.providerStatus !== "VERIFICATION_EXCEPTION" && (
                   <p className="mt-5 rounded-xl bg-[#fff9e8] px-4 py-3 text-sm leading-6 text-[#765710]">
-                    Ne soumettez pas un second dépôt pour cette transaction. Le résultat se met à jour automatiquement lorsque Keccel le confirme.
+                    Ne soumettez pas un second dépôt pour cette transaction. Le résultat se met à jour automatiquement lorsque Africoin le confirme.
                   </p>
                 )}
                 {result.providerStatus === "SUCCESS_COMPLIANCE_HOLD" && (
@@ -149,7 +149,7 @@ export default function PaymentSuccess() {
                       className="border-[#087f78]/30 text-[#0a2233]"
                     >
                       <RefreshCw className={`mr-2 h-4 w-4 ${refreshStatus.isPending ? "animate-spin" : ""}`} />
-                      {refreshStatus.isPending ? "Vérification auprès de Keccel…" : "Vérifier auprès de Keccel"}
+                      {refreshStatus.isPending ? "Vérification auprès de Africoin…" : "Vérifier auprès de Africoin"}
                     </Button>
                   )}
                   <Button onClick={() => setLocation("/wallets")} className="bg-[#0a2233] text-white hover:bg-[#0d2638]">

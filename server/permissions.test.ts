@@ -16,10 +16,10 @@ describe("permission matrix", () => {
   });
 
   it("exposes clear French labels and scopes", () => {
-    expect(roleLabel("admin")).toBe("Admin");
-    expect(roleLabel("super_admin")).toBe("Super Admin");
+    expect(roleLabel("admin")).toBe("Équipe Africoin");
+    expect(roleLabel("super_admin")).toBe("Équipe Africoin");
     expect(roleLabel("compliance")).toBe("Conformité");
     expect(roleScope("compliance")).toContain("KYC");
-    expect(roleScope("super_admin")).toContain("gestion des rôles");
+    expect(roleScope("super_admin")).toBe("Équipe Africoin");
   });
 });

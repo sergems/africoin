@@ -28,7 +28,7 @@ describe("admin approval governance", () => {
 
   it("prevents self-approval-sensitive actions before persistence", () => {
     expect(() => validateApprovalRequest({ actionType: "role_change", requesterUserId: 7, payload: { targetUserId: 7, role: "admin" } })).toThrow("propre rôle");
-    expect(() => validateApprovalRequest({ actionType: "account_status", requesterUserId: 7, payload: { targetUserId: 7, status: "blocked" } })).toThrow("se bloquer");
+    expect(() => validateApprovalRequest({ actionType: "account_status", requesterUserId: 7, payload: { targetUserId: 7, status: "blocked" } })).toThrow("bloquer vous-même");
     expect(() => validateApprovalRequest({ actionType: "limit_update", requesterUserId: 7, payload: { targetUserId: 9, dailyDepositLimit: 1 } })).toThrow("trois limites");
   });
 

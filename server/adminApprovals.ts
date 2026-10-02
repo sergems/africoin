@@ -60,14 +60,14 @@ export function validateApprovalRequest(input: {
   payload: ApprovalPayload;
 }) {
   if (input.actionType === "role_change" && input.requesterUserId === input.payload.targetUserId) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas modifier son propre rôle." });
+    throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas modifier votre propre rôle avec cette action." });
   }
   if (
     input.actionType === "account_status" &&
     input.requesterUserId === input.payload.targetUserId &&
     input.payload.status !== "active"
   ) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Un administrateur ne peut pas se bloquer lui-même." });
+    throw new TRPCError({ code: "FORBIDDEN", message: "Vous ne pouvez pas vous bloquer vous-même." });
   }
   if (input.actionType === "role_change" && !input.payload.role) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Le nouveau rôle est requis." });
@@ -103,7 +103,7 @@ export async function createApprovalRequest(input: {
     .where(and(eq(adminApprovalRequests.status, "pending"), eq(adminApprovalRequests.requestedBy, input.requesterUserId)))
     .limit(1);
   if (existing[0]) {
-    throw new TRPCError({ code: "CONFLICT", message: "Une demande d’approbation est déjà ouverte pour cet administrateur." });
+    throw new TRPCError({ code: "CONFLICT", message: "Une demande d’approbation est déjà ouverte pour ce compte Africoin." });
   }
   const inserted = await db.insert(adminApprovalRequests).values({
     actionType: storageActionType(input.actionType),
