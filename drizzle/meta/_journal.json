@@ -92,6 +92,27 @@
       "when": 1790375133847,
       "tag": "0012_awesome_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1790934785057,
+      "tag": "0013_keccel_payin",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1790935719649,
+      "tag": "0014_keccel_settlement_safety",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1790940462540,
+      "tag": "0015_withdrawal_approval_queue",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import { hasPermission, permissionMatrix, roleLabel, roleScope } from "@shared/p
 describe("permission matrix", () => {
   it("keeps operational, compliance, and role-management scopes distinct", () => {
     expect(hasPermission("admin", "funding.review")).toBe(true);
+    expect(hasPermission("super_admin", "funding.review")).toBe(true);
     expect(hasPermission("admin", "user.status")).toBe(true);
     expect(hasPermission("admin", "kyc.review")).toBe(false);
     expect(hasPermission("admin", "user.role")).toBe(false);

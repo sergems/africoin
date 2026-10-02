@@ -26,7 +26,7 @@ export interface CustodyProvider {
 }
 
 export const providerRegistry: ProviderStatus[] = [
-  { name: "Partenaire de paiement", category: "payments", mode: "pending_activation", connected: false, activationRequirements: ["Contrat partenaire agréé", "Identifiants API de production", "Webhooks signés", "Validation conformité"] },
+  { name: "Keccel KelPay (dépôts)", category: "payments", mode: "pending_activation", connected: false, activationRequirements: ["Identifiants Keccel", "URL publique HTTPS du callback", "Guide de payout pour les retraits"] },
   { name: "Africoin Internal Broker", category: "brokerage", mode: "live", connected: true, activationRequirements: [] },
   { name: "Fournisseur FX", category: "fx", mode: "pending_activation", connected: false, activationRequirements: ["Accord de liquidité", "Cadre de change validé", "Limites de risque", "Webhooks de statut"] },
   { name: "Dépositaire / custody", category: "custody", mode: "pending_activation", connected: false, activationRequirements: ["Convention de conservation", "Mapping des comptes", "Réconciliation quotidienne"] },
@@ -34,5 +34,18 @@ export const providerRegistry: ProviderStatus[] = [
 ];
 
 export function getProviderRegistry() {
-  return providerRegistry.map(provider => ({ ...provider, activationRequirements: [...provider.activationRequirements] }));
+  const keccelReady = Boolean(process.env.KECCEL_API_TOKEN?.trim() && process.env.KECCEL_MERCHANT_CODE?.trim() && process.env.KECCEL_CALLBACK_URL?.trim());
+  return providerRegistry.map(provider => provider.name === "Keccel KelPay (dépôts)"
+    ? {
+        ...provider,
+        mode: keccelReady ? "live" as const : "pending_activation" as const,
+        connected: keccelReady,
+        activationRequirements: [
+          ...(!process.env.KECCEL_API_TOKEN?.trim() ? ["Jeton API Keccel"] : []),
+          ...(!process.env.KECCEL_MERCHANT_CODE?.trim() ? ["Code marchand Keccel"] : []),
+          ...(!process.env.KECCEL_CALLBACK_URL?.trim() ? ["URL HTTPS publique du callback"] : []),
+          "Guide Keccel de payout pour activer les retraits",
+        ],
+      }
+    : { ...provider, activationRequirements: [...provider.activationRequirements] });
 }

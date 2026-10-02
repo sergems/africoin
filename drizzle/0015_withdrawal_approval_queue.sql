@@ -1,0 +1,1 @@
+ALTER TABLE `withdrawal_requests` MODIFY COLUMN `status` enum('requested','pending_review','processing','approved_pending_payout','completed','rejected','failed','blocked') NOT NULL DEFAULT 'requested';

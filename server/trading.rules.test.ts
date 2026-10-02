@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
-import { providerRegistry } from "./providers";
 import { resolveTradeExecutionMode } from "./tradingGuards";
 import type { TrpcContext } from "./_core/context";
 
@@ -18,7 +17,7 @@ function context(role: "user" | "compliance" | "admin" = "user"): TrpcContext {
       lastSignedIn: new Date(),
     },
     req: { protocol: "https", headers: {} } as TrpcContext["req"],
-    res: { clearCookie: () => undefined } as TrpcContext["res"],
+    res: { clearCookie: () => undefined } as unknown as TrpcContext["res"],
   };
 }
 
@@ -44,23 +43,28 @@ describe("AFRICOIN TRADING GROUP controls", () => {
     await expect(caller.compliance.queue()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("does not allow a withdrawal above the available wallet balance", async () => {
-    const paymentsProvider = providerRegistry.find(provider => provider.category === "payments");
-    if (!paymentsProvider) throw new Error("Payments provider fixture missing");
-    const previousMode = paymentsProvider.mode;
-    const previousConnected = paymentsProvider.connected;
-    paymentsProvider.mode = "live";
-    paymentsProvider.connected = true;
-    try {
-      const caller = appRouter.createCaller(context());
-      await expect(caller.wallets.requestWithdrawal({
-        amount: 999999999,
-        currency: "USD",
-        destinationType: "partner",
-      })).rejects.toMatchObject({ code: "BAD_REQUEST" });
-    } finally {
-      paymentsProvider.mode = previousMode;
-      paymentsProvider.connected = previousConnected;
-    }
+  it("rejects withdrawal requests with more than two decimal places before database access", async () => {
+    const caller = appRouter.createCaller(context());
+    await expect(caller.wallets.requestWithdrawal({
+      amount: 1.001,
+      currency: "USD",
+      destinationType: "partner",
+    })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("requires an authenticated user to submit a withdrawal request", async () => {
+    const unauthenticated = { user: null, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: {} as unknown as TrpcContext["res"] } as TrpcContext;
+    await expect(appRouter.createCaller(unauthenticated).wallets.requestWithdrawal({ amount: 10, currency: "USD", destinationType: "mobile_money" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("restricts withdrawal decisions to funding reviewers and refuses manual payout confirmation", async () => {
+    const userCaller = appRouter.createCaller(context("user"));
+    await expect(userCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const complianceCaller = appRouter.createCaller(context("compliance"));
+    await expect(complianceCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    const adminCaller = appRouter.createCaller(context("admin"));
+    await expect(adminCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review", providerReference: "PAYOUT-123" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

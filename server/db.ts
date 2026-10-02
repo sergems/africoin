@@ -1,5 +1,7 @@
+import path from "node:path";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { migrate } from "drizzle-orm/mysql2/migrator";
 import {
   InsertUser,
   auditLogs,
@@ -34,6 +36,25 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+let _migrationPromise: Promise<void> | undefined;
+
+export function runDatabaseMigrations() {
+  if (!_migrationPromise) {
+    _migrationPromise = (async () => {
+      const db = await getDb();
+      if (!db) {
+        if (process.env.NODE_ENV === "production") throw new Error("DATABASE_URL is required to start the production server.");
+        return;
+      }
+      await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "drizzle") });
+    })().catch(error => {
+      _migrationPromise = undefined;
+      throw error;
+    });
+  }
+  return _migrationPromise;
 }
 
 export function resolveUpsertRole(openId: string, requestedRole: InsertUser["role"], ownerOpenId: string) {
@@ -179,7 +200,7 @@ export async function getComplianceQueue() {
     db.select().from(kycCases).orderBy(desc(kycCases.updatedAt)).limit(50),
     db.select().from(complianceAlerts).where(inArray(complianceAlerts.status, ["open", "investigating"])).orderBy(desc(complianceAlerts.createdAt)).limit(50),
     db.select().from(depositRequests).where(inArray(depositRequests.status, ["requested", "pending_review", "processing"])).orderBy(desc(depositRequests.createdAt)).limit(50),
-    db.select().from(withdrawalRequests).where(inArray(withdrawalRequests.status, ["requested", "pending_review", "processing", "blocked"])).orderBy(desc(withdrawalRequests.createdAt)).limit(50),
+    db.select().from(withdrawalRequests).where(inArray(withdrawalRequests.status, ["requested", "pending_review", "processing", "approved_pending_payout", "blocked"])).orderBy(desc(withdrawalRequests.createdAt)).limit(50),
   ]);
   return { kyc, alerts, deposits, withdrawals };
 }

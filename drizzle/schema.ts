@@ -5,6 +5,7 @@ import {
   mysqlTable,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 
@@ -111,6 +112,11 @@ export const depositRequests = mysqlTable("deposit_requests", {
   status: mysqlEnum("status", ["requested", "pending_review", "processing", "completed", "rejected", "failed"]).default("requested").notNull(),
   reference: varchar("reference", { length: 120 }).notNull().unique(),
   providerReference: varchar("providerReference", { length: 180 }),
+  paymentProvider: varchar("paymentProvider", { length: 40 }),
+  providerStatus: varchar("providerStatus", { length: 80 }),
+  providerCheckCount: int("providerCheckCount").default(0).notNull(),
+  candidateTransactionId: varchar("candidateTransactionId", { length: 180 }),
+  statusCheckNotBefore: timestamp("statusCheckNotBefore", { fsp: 3 }),
   complianceNote: text("complianceNote"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -123,7 +129,7 @@ export const withdrawalRequests = mysqlTable("withdrawal_requests", {
   amount: decimal("amount", { precision: 24, scale: 8 }).notNull(),
   currency: mysqlEnum("currency", ["CDF", "USD"]).notNull(),
   destinationType: mysqlEnum("destinationType", ["bank_account", "mobile_money", "partner"]).notNull(),
-  status: mysqlEnum("status", ["requested", "pending_review", "processing", "completed", "rejected", "failed", "blocked"]).default("requested").notNull(),
+  status: mysqlEnum("status", ["requested", "pending_review", "processing", "approved_pending_payout", "completed", "rejected", "failed", "blocked"]).default("requested").notNull(),
   reference: varchar("reference", { length: 120 }).notNull().unique(),
   providerReference: varchar("providerReference", { length: 180 }),
   complianceNote: text("complianceNote"),
@@ -311,11 +317,13 @@ export const riskLimits = mysqlTable("risk_limits", {
 export const idempotencyKeys = mysqlTable("idempotency_keys", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
-  key: varchar("key", { length: 160 }).notNull().unique(),
+  key: varchar("key", { length: 160 }).notNull(),
   operation: varchar("operation", { length: 80 }).notNull(),
   response: text("response"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, table => ({
+  userKeyOperationUnique: uniqueIndex("idempotency_keys_user_key_operation_unique").on(table.userId, table.key, table.operation),
+}));
 
 
 export const reconciliationHistory = mysqlTable("reconciliation_history", {

@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { router, publicProcedure, protectedProcedure, adminProcedure, permissionProcedure } from "./_core/trpc";
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
@@ -53,6 +54,7 @@ import {
 } from "./db";
 import { getProviderRegistry } from "./providers";
 import { buildFundingDecisionNotification } from "./notificationService";
+import { createWithdrawalRequest, decideWithdrawalRequest, isWithdrawalAwaitingAdminReview } from "./withdrawals";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { adjustAdminUserWallet, createAdminAccount, deleteAdminUser, getAdminUserDetail, listAdminUsers, requestAdminUserRole, requestAdminUserStatus, reviewAdminUserKyc, setSuperAdminUserStatus, updateAdminUserAccount } from "./adminUsers";
 import { createApprovalRequest, decideApproval, listApprovalRequests } from "./adminApprovals";
@@ -61,6 +63,7 @@ import { sdk } from "./_core/sdk";
 import type { TrpcContext } from "./_core/context";
 import { evaluateTradingEligibility, resolveTradeExecutionMode } from "./tradingGuards";
 import { processTriggeredInternalOrders } from "./internalBroker";
+import { assertKelpayPayinConfigured, initiateKelpayDeposit, KelpayConfigurationError, refreshKelpayDepositStatus, toKelpayClientStatus } from "./kelpay";
 
 const requireCompliance = permissionProcedure("kyc.review");
 
@@ -323,64 +326,177 @@ export const appRouter = router({
   }),
   wallets: router({
     balances: protectedProcedure.query(({ ctx }) => getUserWallets(ctx.user.id)),
-    requestDeposit: protectedProcedure.input(z.object({ amount: z.number().positive(), currency: z.enum(["CDF", "USD"]), method: z.enum(["bank_transfer", "mobile_money", "card", "partner"]), idempotencyKey: z.string().min(8).max(160).optional() })).mutation(async ({ ctx, input }) => {
+    requestDeposit: protectedProcedure.input(z.object({ amount: z.number().positive().max(1_000_000).refine(value => Number(value.toFixed(2)) === value, "Le montant doit comporter au maximum deux décimales."), currency: z.enum(["CDF", "USD"]), mobileNumber: z.string().trim().regex(/^\+?243\d{9}$/, "Entrez un numéro mobile de RDC au format +243XXXXXXXXX."), idempotencyKey: z.string().min(8).max(160).optional() })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
-      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour soumettre un financement." });
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour soumettre un dépôt." });
       if (input.idempotencyKey) { const previous = await getIdempotentResponse(ctx.user.id, input.idempotencyKey, "wallet.deposit"); if (previous) return previous; }
-      const reference = randomReference("DEP");
+      const unresolvedDeposit = (await db.select({ reference: depositRequests.reference }).from(depositRequests).where(and(
+        eq(depositRequests.userId, ctx.user.id),
+        eq(depositRequests.paymentProvider, "KECCEL"),
+        inArray(depositRequests.status, ["processing", "pending_review"]),
+        inArray(depositRequests.providerStatus, ["SUBMISSION_UNKNOWN", "CALLBACK_RECEIVED", "STATUS_CHECK_UNAVAILABLE", "VERIFICATION_EXCEPTION", "SUCCESS_COMPLIANCE_HOLD"]),
+      )).limit(1))[0];
+      if (unresolvedDeposit) throw new TRPCError({ code: "CONFLICT", message: `Le dépôt ${unresolvedDeposit.reference} nécessite une vérification avant tout nouveau dépôt.` });
+      try {
+        assertKelpayPayinConfigured();
+      } catch (error) {
+        if (error instanceof KelpayConfigurationError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Keccel KelPay n’est pas configuré. Contactez l’administrateur." });
+        throw error;
+      }
+      const reference = input.idempotencyKey
+        ? `DEP-${createHash("sha256").update(`${ctx.user.id}:${input.idempotencyKey}`).digest("hex").slice(0, 32).toUpperCase()}`
+        : randomReference("DEP");
+      const existing = (await db.select().from(depositRequests).where(and(eq(depositRequests.reference, reference), eq(depositRequests.userId, ctx.user.id))).limit(1))[0];
+      if (existing) return { reference, ...toKelpayClientStatus(existing) };
       const wallet = await ensureWallet(ctx.user.id, input.currency);
       if (!wallet) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Portefeuille indisponible." });
-      await db.insert(depositRequests).values({ userId: ctx.user.id, walletId: wallet.id, amount: input.amount.toFixed(8), currency: input.currency, method: input.method, reference, status: "requested" });
-      await db.insert(reconciliationRecords).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched" }); await db.insert(reconciliationHistory).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched" });
-      await db.insert(notifications).values({ userId: ctx.user.id, type: "deposit", title: "Demande de dépôt créée", message: `${input.amount} ${input.currency} · ${reference}` });
-      await writeAuditLog({ actorUserId: ctx.user.id, action: "deposit.requested", entityType: "deposit_request", entityId: reference, metadata: { amount: input.amount, currency: input.currency, method: input.method } });
-      const response = { reference, status: "requested" as const, mode: "pending_activation" as const, message: "Demande créée. Elle sera créditée uniquement après approbation de l’administrateur et confirmation du règlement." };
+      const riskLimit = await getOrCreateRiskLimit(ctx.user.id);
+      if (!riskLimit) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Les limites de conformité sont indisponibles." });
+      let racedRequest: typeof depositRequests.$inferSelect | null = null;
+      try {
+        racedRequest = await db.transaction(async tx => {
+          const lockedUser = (await tx.select({ id: users.id }).from(users).where(eq(users.id, ctx.user.id)).for("update"))[0];
+          if (!lockedUser) throw new TRPCError({ code: "NOT_FOUND", message: "Compte introuvable." });
+          const concurrentRequest = (await tx.select().from(depositRequests).where(and(eq(depositRequests.reference, reference), eq(depositRequests.userId, ctx.user.id))).limit(1))[0];
+          if (concurrentRequest) return concurrentRequest;
+
+          const kyc = (await tx.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.updatedAt)).limit(1).for("update"))[0];
+          if (kyc?.status !== "approved") throw new TRPCError({ code: "FORBIDDEN", message: "La validation KYC est requise avant tout dépôt." });
+          const limits = (await tx.select().from(riskLimits).where(eq(riskLimits.userId, ctx.user.id)).limit(1).for("update"))[0];
+          if (limits?.status !== "active") throw new TRPCError({ code: "FORBIDDEN", message: "Votre compte est restreint par la conformité." });
+
+          const startOfDay = new Date();
+          startOfDay.setUTCHours(0, 0, 0, 0);
+          const todaysDeposits = await tx.select({ amount: depositRequests.amount }).from(depositRequests).where(and(
+            eq(depositRequests.userId, ctx.user.id),
+            gte(depositRequests.createdAt, startOfDay),
+            inArray(depositRequests.status, ["requested", "pending_review", "processing", "completed"]),
+          ));
+          const totalToday = todaysDeposits.reduce((sum, row) => sum + Number(row.amount), 0);
+          if (totalToday + input.amount > Number(limits.dailyDepositLimit)) throw new TRPCError({ code: "FORBIDDEN", message: "La limite quotidienne de dépôt autorisée serait dépassée." });
+
+          await tx.insert(depositRequests).values({ userId: ctx.user.id, walletId: wallet.id, amount: input.amount.toFixed(8), currency: input.currency, method: "mobile_money", reference, status: "processing", paymentProvider: "KECCEL", providerStatus: "SUBMITTING", providerCheckCount: 0, statusCheckNotBefore: new Date(Date.now() + 5_000) });
+          await tx.insert(reconciliationRecords).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched" });
+          await tx.insert(reconciliationHistory).values({ requestReference: reference, entityType: "deposit", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched", reviewNote: "Keccel KelPay mobile-money request created." });
+          await tx.insert(notifications).values({ userId: ctx.user.id, type: "deposit", title: "Demande Keccel créée", message: `${input.amount.toFixed(2)} ${input.currency} · ${reference}` });
+          return null;
+        });
+      } catch (error) {
+        const raced = (await db.select().from(depositRequests).where(and(eq(depositRequests.reference, reference), eq(depositRequests.userId, ctx.user.id))).limit(1))[0];
+        if (raced) return { reference, ...toKelpayClientStatus(raced) };
+        throw error;
+      }
+      if (racedRequest) return { reference, ...toKelpayClientStatus(racedRequest) };
+      await writeAuditLog({ actorUserId: ctx.user.id, action: "deposit.keccel_requested", entityType: "deposit_request", entityId: reference, metadata: { amount: input.amount, currency: input.currency, paymentProvider: "KECCEL" } });
+      const providerState = await initiateKelpayDeposit({ reference, mobileNumber: input.mobileNumber.replace(/^\+/, ""), amount: input.amount.toFixed(2), currency: input.currency });
+      const response = { reference, ...providerState };
       if (input.idempotencyKey) await saveIdempotentResponse(ctx.user.id, input.idempotencyKey, "wallet.deposit", response);
       return response;
     }),
-    requestWithdrawal: protectedProcedure.input(z.object({ amount: z.number().positive(), currency: z.enum(["CDF", "USD"]), destinationType: z.enum(["bank_account", "mobile_money", "partner"]), idempotencyKey: z.string().min(8).max(160).optional() })).mutation(async ({ ctx, input }) => {
+    getDepositStatus: protectedProcedure.input(z.object({ reference: z.string().min(8).max(120) })).query(async ({ ctx, input }) => {
       const db = await getDb();
-      if (db && input.idempotencyKey) { const previous = await getIdempotentResponse(ctx.user.id, input.idempotencyKey, "wallet.withdrawal"); if (previous) return previous; }
-      const reference = randomReference("WDL");
-      if (!hasConnectedProvider("payments")) return { reference, status: "pending_review", mode: "pending_activation", message: "Retrait enregistré en attente de contrôle conformité." };
-      if (!db) return { reference, status: "pending_review", mode: "pending_activation", message: "Retrait enregistré en attente de contrôle conformité." };
-      const wallet = await ensureWallet(ctx.user.id, input.currency);
-      if (!wallet) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Portefeuille indisponible." });
-      if (Number(wallet.availableBalance) < input.amount) throw new TRPCError({ code: "BAD_REQUEST", message: "Solde disponible insuffisant." });
-      const limit = await getOrCreateRiskLimit(ctx.user.id);
-      if (limit?.status !== "active") throw new TRPCError({ code: "FORBIDDEN", message: "Votre portefeuille est restreint par la conformité." });
-      if (Number(limit.dailyWithdrawalLimit) < input.amount) throw new TRPCError({ code: "BAD_REQUEST", message: "La limite de retrait autorisée est dépassée." });
-      await db.insert(withdrawalRequests).values({ userId: ctx.user.id, walletId: wallet.id, amount: input.amount.toFixed(8), currency: input.currency, destinationType: input.destinationType, reference, status: "pending_review" });
-      await db.insert(reconciliationRecords).values({ requestReference: reference, entityType: "withdrawal", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched" }); await db.insert(reconciliationHistory).values({ requestReference: reference, entityType: "withdrawal", expectedAmount: input.amount.toFixed(8), currency: input.currency, status: "unmatched" });
-      await db.insert(notifications).values({ userId: ctx.user.id, type: "withdrawal", title: "Demande de retrait soumise", message: `${input.amount} ${input.currency} · contrôle conformité en attente.` });
-      await writeAuditLog({ actorUserId: ctx.user.id, action: "withdrawal.requested", entityType: "withdrawal_request", entityId: reference, severity: "warning", metadata: { amount: input.amount, currency: input.currency } });
-      const response = { reference, status: "pending_review" as const, mode: "pending_activation" as const, message: "Retrait soumis au contrôle conformité; le paiement sera déclenché après validation du partenaire agréé." };
-      if (input.idempotencyKey) await saveIdempotentResponse(ctx.user.id, input.idempotencyKey, "wallet.withdrawal", response);
-      return response;
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour lire le résultat du dépôt." });
+      const row = (await db.select().from(depositRequests).where(and(
+        eq(depositRequests.reference, input.reference),
+        eq(depositRequests.userId, ctx.user.id),
+        eq(depositRequests.paymentProvider, "KECCEL"),
+      )).limit(1))[0];
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Dépôt Keccel introuvable." });
+      return {
+        reference: row.reference,
+        amount: row.amount,
+        currency: row.currency,
+        createdAt: row.createdAt.toISOString(),
+        ...toKelpayClientStatus(row),
+      };
     }),
+    refreshKelpayStatus: protectedProcedure.input(z.object({ reference: z.string().min(8).max(120) })).mutation(async ({ ctx, input }) => {
+      const result = await refreshKelpayDepositStatus({ userId: ctx.user.id, reference: input.reference });
+      if (!result || !("message" in result)) throw new TRPCError({ code: "NOT_FOUND", message: "Dépôt Keccel introuvable." });
+      return result;
+    }),
+    requestWithdrawal: protectedProcedure
+      .input(z.object({ amount: z.number().positive().max(1_000_000).refine(value => Number(value.toFixed(2)) === value, "Le montant doit comporter au maximum deux décimales."), currency: z.enum(["CDF", "USD"]), destinationType: z.enum(["bank_account", "mobile_money", "partner"]), idempotencyKey: z.string().min(8).max(160).optional() }))
+      .mutation(({ ctx, input }) => createWithdrawalRequest({ userId: ctx.user.id, ...input })),
   }),
   adminFunding: router({
-    queue: permissionProcedure("funding.review").query(async () => { const db = await getDb(); if (!db) return { deposits: [], withdrawals: [], totals: { pending: 0, deposits: 0, withdrawals: 0 } }; const [deposits, withdrawals] = await Promise.all([db.select().from(depositRequests).where(inArray(depositRequests.status, ["requested", "pending_review", "processing"])).orderBy(desc(depositRequests.createdAt)).limit(200), db.select().from(withdrawalRequests).where(inArray(withdrawalRequests.status, ["requested", "pending_review", "processing"])).orderBy(desc(withdrawalRequests.createdAt)).limit(200)]); const requests = [...deposits, ...withdrawals]; const userIds = Array.from(new Set(requests.map(row => row.userId))); const [userRows, profileRows, kycRows, limitRows, alertRows, walletRows, auditRows, notificationRows, reconRows, reconHistoryRows] = await Promise.all([userIds.length ? db.select().from(users).where(inArray(users.id, userIds)) : [], userIds.length ? db.select().from(clientProfiles).where(inArray(clientProfiles.userId, userIds)) : [], userIds.length ? db.select().from(kycCases).where(inArray(kycCases.userId, userIds)) : [], userIds.length ? db.select().from(riskLimits).where(inArray(riskLimits.userId, userIds)) : [], userIds.length ? db.select().from(complianceAlerts).where(and(inArray(complianceAlerts.userId, userIds), inArray(complianceAlerts.status, ["open", "investigating"]))) : [], userIds.length ? db.select().from(wallets).where(inArray(wallets.userId, userIds)) : [], requests.length ? db.select().from(auditLogs).where(inArray(auditLogs.entityId, requests.map(row => String(row.id)))).orderBy(desc(auditLogs.createdAt)).limit(100) : [], userIds.length ? db.select().from(notifications).where(inArray(notifications.userId, userIds)).orderBy(desc(notifications.createdAt)).limit(100) : [], requests.length ? db.select().from(reconciliationRecords).where(inArray(reconciliationRecords.requestReference, requests.map(row => row.reference))).orderBy(desc(reconciliationRecords.createdAt)) : [], requests.length ? db.select().from(reconciliationHistory).where(inArray(reconciliationHistory.requestReference, requests.map(row => row.reference))).orderBy(desc(reconciliationHistory.createdAt)) : []]); const enrich = (row: any, kind: "deposit" | "withdrawal") => ({ ...row, user: userRows.find(user => user.id === row.userId) ?? null, profile: profileRows.find(profile => profile.userId === row.userId) ?? null, kyc: kycRows.find(kyc => kyc.userId === row.userId) ?? null, limits: limitRows.find(limit => limit.userId === row.userId) ?? null, alerts: alertRows.filter(alert => alert.userId === row.userId), wallets: walletRows.filter(wallet => wallet.userId === row.userId), reconciliation: reconRows.filter(recon => recon.requestReference === row.reference), reconciliationHistory: reconHistoryRows.filter(recon => recon.requestReference === row.reference), audit: auditRows.filter(log => log.entityId === String(row.id) && log.entityType === `${kind}_request`), notifications: notificationRows.filter(notification => notification.userId === row.userId && notification.message.includes(row.reference)) }); return { deposits: deposits.map(row => enrich(row, "deposit")), withdrawals: withdrawals.map(row => enrich(row, "withdrawal")), totals: { pending: deposits.length + withdrawals.length, deposits: deposits.length, withdrawals: withdrawals.length } }; }),
+    queue: permissionProcedure("funding.review").query(async () => {
+      const db = await getDb();
+      if (!db) return { deposits: [], withdrawals: [], totals: { pending: 0, deposits: 0, withdrawals: 0, approvedAwaitingPayout: 0 } };
+      const [deposits, withdrawals] = await Promise.all([
+        db.select().from(depositRequests).where(inArray(depositRequests.status, ["requested", "pending_review", "processing"])).orderBy(desc(depositRequests.createdAt)).limit(200),
+        db.select().from(withdrawalRequests).where(inArray(withdrawalRequests.status, ["requested", "pending_review", "processing", "approved_pending_payout"])).orderBy(desc(withdrawalRequests.createdAt)).limit(200),
+      ]);
+      const requests = [...deposits, ...withdrawals];
+      const userIds = Array.from(new Set(requests.map(row => row.userId)));
+      const [userRows, profileRows, kycRows, limitRows, alertRows, walletRows, auditRows, notificationRows, reconRows, reconHistoryRows] = await Promise.all([
+        userIds.length ? db.select().from(users).where(inArray(users.id, userIds)) : [],
+        userIds.length ? db.select().from(clientProfiles).where(inArray(clientProfiles.userId, userIds)) : [],
+        userIds.length ? db.select().from(kycCases).where(inArray(kycCases.userId, userIds)) : [],
+        userIds.length ? db.select().from(riskLimits).where(inArray(riskLimits.userId, userIds)) : [],
+        userIds.length ? db.select().from(complianceAlerts).where(and(inArray(complianceAlerts.userId, userIds), inArray(complianceAlerts.status, ["open", "investigating"]))) : [],
+        userIds.length ? db.select().from(wallets).where(inArray(wallets.userId, userIds)) : [],
+        requests.length ? db.select().from(auditLogs).where(inArray(auditLogs.entityId, requests.map(row => String(row.id)))).orderBy(desc(auditLogs.createdAt)).limit(100) : [],
+        userIds.length ? db.select().from(notifications).where(inArray(notifications.userId, userIds)).orderBy(desc(notifications.createdAt)).limit(100) : [],
+        requests.length ? db.select().from(reconciliationRecords).where(inArray(reconciliationRecords.requestReference, requests.map(row => row.reference))).orderBy(desc(reconciliationRecords.createdAt)) : [],
+        requests.length ? db.select().from(reconciliationHistory).where(inArray(reconciliationHistory.requestReference, requests.map(row => row.reference))).orderBy(desc(reconciliationHistory.createdAt)) : [],
+      ]);
+      const enrich = (row: any, kind: "deposit" | "withdrawal") => ({
+        ...row,
+        user: userRows.find(user => user.id === row.userId) ?? null,
+        profile: profileRows.find(profile => profile.userId === row.userId) ?? null,
+        kyc: kycRows.find(kyc => kyc.userId === row.userId) ?? null,
+        limits: limitRows.find(limit => limit.userId === row.userId) ?? null,
+        alerts: alertRows.filter(alert => alert.userId === row.userId),
+        wallets: walletRows.filter(wallet => wallet.userId === row.userId),
+        reconciliation: reconRows.filter(recon => recon.requestReference === row.reference),
+        reconciliationHistory: reconHistoryRows.filter(recon => recon.requestReference === row.reference),
+        audit: auditRows.filter(log => log.entityId === String(row.id) && log.entityType === `${kind}_request`),
+        notifications: notificationRows.filter(notification => notification.userId === row.userId && notification.message.includes(row.reference)),
+      });
+      const awaitingDecision = withdrawals.filter(row => isWithdrawalAwaitingAdminReview(row.status));
+      const approvedAwaitingPayout = withdrawals.filter(row => row.status === "approved_pending_payout").length;
+      return {
+        deposits: deposits.map(row => enrich(row, "deposit")),
+        withdrawals: withdrawals.map(row => enrich(row, "withdrawal")),
+        totals: { pending: deposits.length + awaitingDecision.length, deposits: deposits.length, withdrawals: awaitingDecision.length, approvedAwaitingPayout },
+      };
+    }),
     decide: permissionProcedure("funding.review").input(z.object({ kind: z.enum(["deposit", "withdrawal"]), id: z.number().int().positive(), decision: z.enum(["approve", "reject"]), note: z.string().min(3).max(500), providerReference: z.string().max(180).optional(), settledAmount: z.number().positive().optional() })).mutation(async ({ ctx, input }) => {
+      if (input.kind === "withdrawal") {
+        return decideWithdrawalRequest({
+          actorUserId: ctx.user.id,
+          id: input.id,
+          decision: input.decision,
+          note: input.note,
+          providerReference: input.providerReference,
+          settledAmount: input.settledAmount,
+        });
+      }
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour décider un financement." });
-      const table = input.kind === "deposit" ? depositRequests : withdrawalRequests;
-      const row = (await db.select().from(table).where(eq(table.id, input.id)).limit(1))[0];
+      const row = (await db.select().from(depositRequests).where(eq(depositRequests.id, input.id)).limit(1))[0];
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Demande introuvable." });
+      if (row.paymentProvider === "KECCEL") throw new TRPCError({ code: "BAD_REQUEST", message: "Un dépôt Keccel ne peut être réglé manuellement. Il faut vérifier sa transaction auprès du fournisseur." });
       if (!["requested", "pending_review", "processing"].includes(row.status)) throw new TRPCError({ code: "BAD_REQUEST", message: "Cette demande a déjà été traitée." });
       const settledAmount = input.settledAmount ?? Number(row.amount);
-      const status = input.decision === "approve" ? (input.kind === "deposit" ? "completed" : "processing") : "rejected";
+      const status = input.decision === "approve" ? "completed" as const : "rejected" as const;
       await db.transaction(async tx => {
-        await tx.update(table).set({ status, complianceNote: input.note, providerReference: input.providerReference }).where(eq(table.id, input.id));
-        await tx.update(reconciliationRecords).set({ status: input.decision === "approve" ? "matched" : "exception", settledAmount: input.decision === "approve" ? settledAmount.toFixed(8) : undefined, providerReference: input.providerReference, reviewNote: input.note, reviewedBy: ctx.user.id }).where(eq(reconciliationRecords.requestReference, row.reference));
-        await tx.insert(reconciliationHistory).values({ requestReference: row.reference, entityType: input.kind, expectedAmount: row.amount, settledAmount: input.decision === "approve" ? settledAmount.toFixed(8) : undefined, currency: row.currency, status: input.decision === "approve" ? "matched" : "exception", providerReference: input.providerReference, reviewNote: input.note, reviewedBy: ctx.user.id });
-        if (input.kind === "deposit" && input.decision === "approve") {
+        const changed = await tx.update(depositRequests).set({ status, complianceNote: input.note, providerReference: input.providerReference }).where(and(
+          eq(depositRequests.id, input.id),
+          inArray(depositRequests.status, ["requested", "pending_review", "processing"]),
+        ));
+        if (!changed[0]?.affectedRows) throw new TRPCError({ code: "CONFLICT", message: "Cette demande a déjà été traitée." });
+        const reconciliationStatus = input.decision === "approve" ? "matched" as const : "exception" as const;
+        await tx.update(reconciliationRecords).set({ status: reconciliationStatus, settledAmount: input.decision === "approve" ? settledAmount.toFixed(8) : undefined, providerReference: input.providerReference, reviewNote: input.note, reviewedBy: ctx.user.id }).where(eq(reconciliationRecords.requestReference, row.reference));
+        await tx.insert(reconciliationHistory).values({ requestReference: row.reference, entityType: "deposit", expectedAmount: row.amount, settledAmount: input.decision === "approve" ? settledAmount.toFixed(8) : undefined, currency: row.currency, status: reconciliationStatus, providerReference: input.providerReference, reviewNote: input.note, reviewedBy: ctx.user.id });
+        if (input.decision === "approve") {
           await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} + ${settledAmount}` }).where(eq(wallets.id, row.walletId));
           await tx.insert(walletTransactions).values({ walletId: row.walletId, userId: row.userId, type: "deposit", direction: "credit", amount: settledAmount.toFixed(8), currency: row.currency, status: "completed", reference: row.reference, providerReference: input.providerReference, description: "Dépôt approuvé par l’administration", completedAt: new Date() });
         }
-        await tx.insert(notifications).values(buildFundingDecisionNotification({ userId: row.userId, type: input.kind, decision: input.decision, reference: row.reference, note: input.note }));
+        await tx.insert(notifications).values(buildFundingDecisionNotification({ userId: row.userId, type: "deposit", decision: input.decision, reference: row.reference, note: input.note }));
       });
-      await writeAuditLog({ actorUserId: ctx.user.id, action: `funding.${input.kind}.${input.decision}`, entityType: `${input.kind}_request`, entityId: String(input.id), severity: input.decision === "reject" ? "warning" : "info", metadata: { note: input.note, providerReference: input.providerReference, settledAmount } });
+      await writeAuditLog({ actorUserId: ctx.user.id, action: `funding.deposit.${input.decision}`, entityType: "deposit_request", entityId: String(input.id), severity: input.decision === "reject" ? "warning" : "info", metadata: { note: input.note, providerReference: input.providerReference, settledAmount } });
       return { success: true as const, status };
     }),
   }),

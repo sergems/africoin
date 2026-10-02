@@ -9,6 +9,7 @@ import Home from "@/pages/Home";
 import Market from "@/pages/Market";
 import ForexTerminal from "@/pages/ForexTerminal";
 import Wallets from "@/pages/Wallets";
+import PaymentSuccess from "@/pages/PaymentSuccess";
 import Activity from "@/pages/Activity";
 import Compliance from "@/pages/Compliance";
 import Documents from "@/pages/Documents";
@@ -26,7 +27,28 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { resolveRouteSurface } from "@shared/routeAccess";
 
 function ProtectedRouter() {
-  return <DashboardLayout><Switch><Route path="/dashboard" component={Home} /><Route path="/market" component={Market} /><Route path="/forex" component={ForexTerminal} /><Route path="/wallets" component={Wallets} /><Route path="/activity" component={Activity} /><Route path="/documents" component={Documents} /><Route path="/settings" component={Settings} /><Route path="/admin" component={Admin} /><Route path="/admin/users" component={AdminUsers} /><Route path="/admin/markets" component={AdminMarkets} /><Route path="/admin/permissions" component={AdminPermissions} /><Route path="/watchlist" component={Watchlist} /><Route path="/compliance" component={Compliance} /><Route path="/404" component={NotFound} /><Route component={NotFound} /></Switch></DashboardLayout>;
+  return (
+    <DashboardLayout>
+      <Switch>
+        <Route path="/dashboard" component={Home} />
+        <Route path="/market" component={Market} />
+        <Route path="/forex" component={ForexTerminal} />
+        <Route path="/wallets" component={Wallets} />
+        <Route path="/payment/success" component={PaymentSuccess} />
+        <Route path="/activity" component={Activity} />
+        <Route path="/documents" component={Documents} />
+        <Route path="/settings" component={Settings} />
+        <Route path="/admin" component={Admin} />
+        <Route path="/admin/users" component={AdminUsers} />
+        <Route path="/admin/markets" component={AdminMarkets} />
+        <Route path="/admin/permissions" component={AdminPermissions} />
+        <Route path="/watchlist" component={Watchlist} />
+        <Route path="/compliance" component={Compliance} />
+        <Route path="/404" component={NotFound} />
+        <Route component={NotFound} />
+      </Switch>
+    </DashboardLayout>
+  );
 }
 
 function Router() {

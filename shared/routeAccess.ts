@@ -9,6 +9,7 @@ export const protectedRoutes = [
   "/market",
   "/watchlist",
   "/wallets",
+  "/payment/success",
   "/activity",
   "/documents",
   "/settings",

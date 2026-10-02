@@ -4,7 +4,7 @@ import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
 function userContext(): TrpcContext {
-  return { user: { id: 999002, openId: "controls-test", name: "Controls", email: "controls@example.com", loginMethod: "test", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: { clearCookie: () => undefined } as TrpcContext["res"] };
+  return { user: { id: 999002, openId: "controls-test", name: "Controls", email: "controls@example.com", loginMethod: "test", role: "user", createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: { clearCookie: () => undefined } as unknown as TrpcContext["res"] };
 }
 
 describe("platform safety controls", () => {
@@ -12,7 +12,8 @@ describe("platform safety controls", () => {
     const providers = getProviderRegistry();
     expect(providers.length).toBeGreaterThanOrEqual(5);
     expect(providers.find(provider => provider.name === "Africoin Internal Broker")).toMatchObject({ category: "brokerage", mode: "live", connected: true });
-    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker").every(provider => provider.mode === "pending_activation" && provider.connected === false)).toBe(true);
+    expect(providers.find(provider => provider.name === "Keccel KelPay (dépôts)")?.category).toBe("payments");
+    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker" && provider.category !== "payments").every(provider => provider.mode === "pending_activation" && provider.connected === false)).toBe(true);
   });
 
   it("rejects non-positive order quantities at the contract boundary", async () => {
@@ -28,8 +29,9 @@ describe("platform safety controls", () => {
 
   it("does not expose an external live execution adapter before partner connection", () => {
     const providers = getProviderRegistry();
-    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker").every(provider => provider.connected === false)).toBe(true);
-    expect(providers.filter(provider => provider.name !== "Africoin Internal Broker").every(provider => provider.mode !== "live")).toBe(true);
+    const externalExecutionAdapters = providers.filter(provider => provider.category === "brokerage" && provider.name !== "Africoin Internal Broker");
+    expect(externalExecutionAdapters.every(provider => provider.connected === false)).toBe(true);
+    expect(externalExecutionAdapters.every(provider => provider.mode !== "live")).toBe(true);
   });
 
   it("blocks orders before partner checks when KYC is not approved", async () => {

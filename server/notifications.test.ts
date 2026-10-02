@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { appRouter } from "./routers";
-import { buildFundingDecisionNotification } from "./notificationService";
+import { buildFundingDecisionNotification, buildWithdrawalRequestNotification } from "./notificationService";
 import type { TrpcContext } from "./_core/context";
 
 function context(userId = 41): TrpcContext {
@@ -37,6 +37,15 @@ describe("notifications", () => {
   it("builds decision notifications with the request reference and reviewer note", () => {
     expect(buildFundingDecisionNotification({ userId: 41, type: "deposit", decision: "approve", reference: "DEP-ABC123", note: "KYC validé" })).toEqual({ userId: 41, type: "deposit", title: "Demande approuvée", message: "DEP-ABC123 · KYC validé" });
     expect(buildFundingDecisionNotification({ userId: 42, type: "withdrawal", decision: "reject", reference: "WDL-XYZ789", note: "Justificatif requis" })).toEqual({ userId: 42, type: "withdrawal", title: "Demande rejetée", message: "WDL-XYZ789 · Justificatif requis" });
+    expect(buildFundingDecisionNotification({ userId: 43, type: "withdrawal", decision: "approve", reference: "WDL-APPROVED", note: "Contrôle terminé" })).toMatchObject({ title: "Retrait approuvé · transfert non envoyé", message: expect.stringContaining("payout Keccel reste désactivé") });
+  });
+
+  it("notifies a user that a withdrawal is awaiting approval without reserving or transferring funds", () => {
+    expect(buildWithdrawalRequestNotification({ userId: 44, reference: "WDL-ABC123", amount: "25.00", currency: "USD" })).toMatchObject({
+      type: "withdrawal",
+      title: "Demande de retrait enregistrée",
+      message: expect.stringContaining("aucun fonds n’a été réservé ni transféré"),
+    });
   });
 
   it("does not expose notifications to unauthenticated callers", async () => {

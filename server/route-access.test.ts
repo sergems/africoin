@@ -27,6 +27,7 @@ describe("public and protected route contract", () => {
       "/market",
       "/watchlist",
       "/wallets",
+      "/payment/success",
       "/activity",
       "/documents",
       "/settings",
@@ -38,6 +39,9 @@ describe("public and protected route contract", () => {
     ]);
     expect(protectedRoutes.every(isProtectedRoute)).toBe(true);
     expect(resolveRouteSurface("/dashboard", false)).toBe("protected");
+    expect(resolveRouteSurface("/payment/success", true)).toBe("loading");
+    expect(resolveRouteSurface("/payment/success", false)).toBe("protected");
+    expect(isPublicRoute("/payment/success")).toBe(false);
     expect(resolveRouteSurface("/admin", false)).toBe("protected");
     expect(resolveRouteSurface("/admin/users", false)).toBe("protected");
     expect(resolveRouteSurface("/admin/permissions", false)).toBe("protected");
