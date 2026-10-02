@@ -1,0 +1,1 @@
+ALTER TABLE `orders` MODIFY COLUMN `executionMode` enum('pending_activation','broker') NOT NULL DEFAULT 'pending_activation';
