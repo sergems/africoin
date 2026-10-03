@@ -8,6 +8,7 @@ import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import {
   auditLogs,
+  africoinFeeTransactions,
   clientProfiles,
   complianceAlerts,
   depositRequests,
@@ -54,8 +55,9 @@ import {
 } from "./db";
 import { getProviderRegistry } from "./providers";
 import { buildFundingDecisionNotification } from "./notificationService";
-import { createWithdrawalRequest, decideWithdrawalRequest, isWithdrawalAwaitingAdminReview } from "./withdrawals";
+import { cancelApprovedWithdrawalRequest, completeWithdrawalPayout, createWithdrawalRequest, decideWithdrawalRequest, getWithdrawalEligibility, isWithdrawalAwaitingAdminReview } from "./withdrawals";
 import { storageGetSignedUrl, storagePut } from "./storage";
+import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES } from "./profileMedia";
 import { adjustAdminUserWallet, createAdminAccount, deleteAdminUser, getAdminUserDetail, listAdminUsers, requestAdminUserRole, requestAdminUserStatus, reviewAdminUserKyc, setSuperAdminUserStatus, updateAdminUserAccount } from "./adminUsers";
 import { createApprovalRequest, decideApproval, listApprovalRequests } from "./adminApprovals";
 import { hashPassword, normalizeEmail, verifyPassword } from "./localAuth";
@@ -142,7 +144,7 @@ export const appRouter = router({
       if (!db) return { case: null, documents: [] };
       const current = (await db.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.updatedAt)).limit(1))[0];
       if (!current) return { case: null, documents: [] };
-      const rows = await db.select().from(kycDocuments).where(eq(kycDocuments.kycCaseId, current.id)).orderBy(desc(kycDocuments.createdAt));
+      const rows = await db.select().from(kycDocuments).where(eq(kycDocuments.kycCaseId, current.id)).orderBy(desc(kycDocuments.createdAt), desc(kycDocuments.id));
       return { case: current, documents: await Promise.all(rows.map(async row => ({ ...row, url: await storageGetSignedUrl(row.storageKey).catch(() => null) }))) };
     }),
     uploadDocument: protectedProcedure.input(z.object({ documentType: z.enum(["identity", "address", "source_of_funds", "corporate", "other"]), fileName: z.string().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "application/pdf"]), base64: z.string().min(16).max(14000000) })).mutation(async ({ ctx, input }) => {
@@ -152,12 +154,11 @@ export const appRouter = router({
       let kycCase = existing[0];
       if (!kycCase) { await db.insert(kycCases).values({ userId: ctx.user.id, status: "pending", riskLevel: "medium" }); kycCase = (await db.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.createdAt)).limit(1))[0]; }
       if (!kycCase) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Dossier KYC indisponible." });
-      if (kycCase.status === "approved") throw new TRPCError({ code: "BAD_REQUEST", message: "Votre dossier KYC est déjà approuvé." });
       const bytes = Buffer.from(input.base64, "base64");
       if (bytes.length > 10 * 1024 * 1024) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Document trop volumineux." });
       const stored = await storagePut(`private-kyc/${ctx.user.id}/${input.fileName}`, bytes, input.mimeType);
       await db.insert(kycDocuments).values({ kycCaseId: kycCase.id, documentType: input.documentType, fileName: input.fileName, storageKey: stored.key, mimeType: input.mimeType, status: "uploaded" });
-      await db.update(kycCases).set({ status: "pending" }).where(eq(kycCases.id, kycCase.id));
+      if (kycCase.status !== "approved") await db.update(kycCases).set({ status: "pending" }).where(eq(kycCases.id, kycCase.id));
       await db.insert(notifications).values({ userId: ctx.user.id, type: "kyc", title: "Document KYC reçu", message: `${input.fileName} a été enregistré pour revue.` });
       await writeAuditLog({ actorUserId: ctx.user.id, action: "kyc.document_uploaded", entityType: "kyc_document", entityId: String(kycCase.id), metadata: { documentType: input.documentType, mimeType: input.mimeType } });
       return { status: "uploaded" as const, mode: "pending_activation" as const, key: stored.key };
@@ -177,7 +178,23 @@ export const appRouter = router({
   profile: router({
     get: protectedProcedure.query(async ({ ctx }) => {
       const profile = await ensureClientProfile(ctx.user.id);
-      return profile ?? { id: 0, userId: ctx.user.id, phone: null, country: "RDC", preferredCurrency: "USD" as const, investorExperience: "none" as const, riskProfile: "unassessed" as const, riskScore: null, createdAt: new Date(), updatedAt: new Date() };
+      const base = profile ?? { id: 0, userId: ctx.user.id, phone: null, country: "RDC", preferredCurrency: "USD" as const, investorExperience: "none" as const, riskProfile: "unassessed" as const, riskScore: null, avatarStorageKey: null, createdAt: new Date(), updatedAt: new Date() };
+      const { avatarStorageKey, ...safeProfile } = base;
+      const avatarUrl = avatarStorageKey ? await storageGetSignedUrl(avatarStorageKey).catch(() => null) : null;
+      return { ...safeProfile, avatarUrl };
+    }),
+    uploadAvatar: protectedProcedure.input(z.object({ mimeType: z.enum(["image/jpeg", "image/png"]), base64: z.string().min(16).max(7_000_000) })).mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour enregistrer votre photo de profil." });
+      const bytes = Buffer.from(input.base64, "base64");
+      if (bytes.length > MAX_PROFILE_PICTURE_BYTES) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "La photo ne peut pas dépasser 5 Mio." });
+      if (!isValidProfilePicture(input.mimeType, bytes)) throw new TRPCError({ code: "BAD_REQUEST", message: "Choisissez une image JPEG ou PNG valide." });
+      const extension = input.mimeType === "image/jpeg" ? "jpg" : "png";
+      const stored = await storagePut(`private-profile-pictures/${ctx.user.id}/avatar.${extension}`, bytes, input.mimeType);
+      await ensureClientProfile(ctx.user.id);
+      await db.update(clientProfiles).set({ avatarStorageKey: stored.key }).where(eq(clientProfiles.userId, ctx.user.id));
+      await writeAuditLog({ actorUserId: ctx.user.id, action: "profile.avatar_updated", entityType: "client_profile", entityId: String(ctx.user.id), metadata: { mimeType: input.mimeType, sizeBytes: bytes.length } });
+      return { success: true as const, avatarUrl: await storageGetSignedUrl(stored.key).catch(() => null) };
     }),
     update: protectedProcedure.input(z.object({ phone: z.string().max(40).optional(), country: z.string().max(80).optional(), dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), address: z.string().max(255).optional(), city: z.string().max(100).optional(), occupation: z.string().max(120).optional(), sourceOfFunds: z.enum(["salary", "business", "investments", "savings", "inheritance", "other"]).optional(), preferredCurrency: z.enum(["CDF", "USD"]).optional(), investorExperience: z.enum(["none", "beginner", "intermediate", "advanced"]).optional() })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
@@ -185,7 +202,7 @@ export const appRouter = router({
       await ensureClientProfile(ctx.user.id);
       await db.update(clientProfiles).set(input).where(eq(clientProfiles.userId, ctx.user.id));
       await writeAuditLog({ actorUserId: ctx.user.id, action: "profile.updated", entityType: "client_profile", entityId: String(ctx.user.id) });
-      return db.select().from(clientProfiles).where(eq(clientProfiles.userId, ctx.user.id)).limit(1).then(rows => rows[0]);
+      return { success: true as const };
     }),
   }),
   dashboard: router({
@@ -279,22 +296,45 @@ export const appRouter = router({
       const catalogInstrument = instrument[0] ?? pendingActivationInstruments.find(item => item.id === input.instrumentId);
       const price = Number(catalogInstrument?.price ?? 0);
       if (!catalogInstrument || price <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Instrument non disponible." });
-      const executionPrice = input.orderType === "market" ? price : Number(input.limitPrice);
-      const notional = executionPrice * input.quantity;
-      const kyc = await getKycCase(ctx.user.id);
+      if (instrument[0] && instrument[0].status !== "active") throw new TRPCError({ code: "BAD_REQUEST", message: "Instrument non disponible." });
       const wallet = await ensureWallet(ctx.user.id, catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH");
       if (!wallet) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Portefeuille indisponible." });
-      const eligibility = evaluateTradingEligibility({ kycStatus: kyc?.status, walletStatus: wallet.status, availableBalance: input.side === "sell" ? Number.MAX_SAFE_INTEGER : Number(wallet.availableBalance), notional });
-      if (!eligibility.allowed) throw new TRPCError({ code: eligibility.reason === "kyc_pending" ? "FORBIDDEN" : "BAD_REQUEST", message: eligibility.message });
       const reference = randomReference("ORD");
       const executionMode = resolveTradeExecutionMode(hasConnectedProvider("brokerage"));
       const isMarket = input.orderType === "market";
+      let executionPrice = 0;
+      let notional = 0;
       const orderId = await db.transaction(async tx => {
+        const currentInstrument = instrument[0]
+          ? (await tx.select().from(instruments).where(eq(instruments.id, input.instrumentId)).limit(1).for("update"))[0]
+          : undefined;
+        if (instrument[0] && currentInstrument?.status !== "active") throw new TRPCError({ code: "BAD_REQUEST", message: "Instrument non disponible." });
+        const currentPrice = Number(currentInstrument?.price ?? price);
+        if (currentPrice <= 0) throw new TRPCError({ code: "BAD_REQUEST", message: "Instrument non disponible." });
+        executionPrice = input.orderType === "market" ? currentPrice : Number(input.limitPrice);
+        notional = executionPrice * input.quantity;
+        const limits = (await tx.select().from(riskLimits).where(eq(riskLimits.userId, ctx.user.id)).limit(1).for("update"))[0];
+        const lockedWallet = (await tx.select().from(wallets).where(eq(wallets.id, wallet.id)).limit(1).for("update"))[0];
+        const eligibility = evaluateTradingEligibility({
+          riskStatus: limits?.status,
+          orderNotionalLimit: limits ? Number(limits.orderNotionalLimit) : undefined,
+          walletStatus: lockedWallet?.status,
+          availableBalance: input.side === "sell" ? Number.MAX_SAFE_INTEGER : Number(lockedWallet?.availableBalance ?? 0),
+          notional,
+        });
+        if (!eligibility.allowed) {
+          const code = eligibility.reason === "risk_limit_unavailable"
+            ? "PRECONDITION_FAILED"
+            : eligibility.reason === "account_restricted" || eligibility.reason === "wallet_restricted"
+              ? "FORBIDDEN"
+              : "BAD_REQUEST";
+          throw new TRPCError({ code, message: eligibility.message });
+        }
         const position = (await tx.select().from(positions).where(and(eq(positions.userId, ctx.user.id), eq(positions.instrumentId, input.instrumentId))).limit(1))[0];
         if (input.side === "sell" && Number(position?.quantity ?? 0) < input.quantity) throw new TRPCError({ code: "BAD_REQUEST", message: "Position insuffisante pour vendre cette quantité." });
         if (isMarket) {
           if (input.side === "buy") {
-            const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${notional}`, updatedAt: new Date() }).where(and(eq(wallets.id, wallet.id), sql`${wallets.availableBalance} >= ${notional}`));
+            const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${notional}`, updatedAt: new Date() }).where(and(eq(wallets.id, wallet.id), eq(wallets.status, "active"), sql`${wallets.availableBalance} >= ${notional}`));
             if (!reserved[0]?.affectedRows) throw new TRPCError({ code: "BAD_REQUEST", message: "Solde disponible insuffisant pour exécuter cet ordre." });
             const oldQuantity = Number(position?.quantity ?? 0);
             const newQuantity = oldQuantity + input.quantity;
@@ -309,7 +349,7 @@ export const appRouter = router({
             await tx.insert(walletTransactions).values({ walletId: wallet.id, userId: ctx.user.id, type: "trade_credit", direction: "credit", amount: notional.toFixed(8), currency: catalogInstrument.quoteCurrency as "CDF" | "USD" | "KES" | "NGN" | "ZAR" | "GHS" | "UGX" | "TZS" | "RWF" | "JPY" | "CAD" | "CHF" | "CNH", status: "completed", reference: `${reference}-CREDIT`, description: `Vente interne ${input.quantity} ${input.symbol} à ${executionPrice}`, completedAt: new Date() });
           }
         } else if (input.side === "buy") {
-          const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${notional}`, pendingBalance: sql`${wallets.pendingBalance} + ${notional}`, updatedAt: new Date() }).where(and(eq(wallets.id, wallet.id), sql`${wallets.availableBalance} >= ${notional}`));
+          const reserved = await tx.update(wallets).set({ availableBalance: sql`${wallets.availableBalance} - ${notional}`, pendingBalance: sql`${wallets.pendingBalance} + ${notional}`, updatedAt: new Date() }).where(and(eq(wallets.id, wallet.id), eq(wallets.status, "active"), sql`${wallets.availableBalance} >= ${notional}`));
           if (!reserved[0]?.affectedRows) throw new TRPCError({ code: "BAD_REQUEST", message: "Solde disponible insuffisant pour réserver cet ordre." });
         }
         const inserted = await tx.insert(orders).values({ userId: ctx.user.id, instrumentId: input.instrumentId, side: input.side, orderType: input.orderType, quantity: input.quantity.toFixed(8), limitPrice: input.limitPrice?.toFixed(8), stopLoss: input.stopLoss?.toFixed(8), takeProfit: input.takeProfit?.toFixed(8), marginUsed: notional.toFixed(8), filledQuantity: isMarket ? input.quantity.toFixed(8) : "0", averagePrice: isMarket ? executionPrice.toFixed(8) : null, realizedPnl: null, status: isMarket ? "filled" : "submitted", executionMode, providerReference: isMarket ? `AFRIBROKER-${reference}` : null, createdAt: new Date(), updatedAt: new Date(), executedAt: isMarket ? new Date() : null });
@@ -360,10 +400,10 @@ export const appRouter = router({
           const concurrentRequest = (await tx.select().from(depositRequests).where(and(eq(depositRequests.reference, reference), eq(depositRequests.userId, ctx.user.id))).limit(1))[0];
           if (concurrentRequest) return concurrentRequest;
 
-          const kyc = (await tx.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.updatedAt)).limit(1).for("update"))[0];
-          if (kyc?.status !== "approved") throw new TRPCError({ code: "FORBIDDEN", message: "La validation KYC est requise avant tout dépôt." });
           const limits = (await tx.select().from(riskLimits).where(eq(riskLimits.userId, ctx.user.id)).limit(1).for("update"))[0];
           if (limits?.status !== "active") throw new TRPCError({ code: "FORBIDDEN", message: "Votre compte est restreint par la conformité." });
+          const lockedWallet = (await tx.select().from(wallets).where(eq(wallets.id, wallet.id)).limit(1).for("update"))[0];
+          if (!lockedWallet || lockedWallet.status !== "active") throw new TRPCError({ code: "FORBIDDEN", message: "Votre portefeuille est indisponible pour les dépôts." });
 
           const startOfDay = new Date();
           startOfDay.setUTCHours(0, 0, 0, 0);
@@ -418,6 +458,7 @@ export const appRouter = router({
     requestWithdrawal: protectedProcedure
       .input(z.object({ amount: z.number().positive().max(1_000_000).refine(value => Number(value.toFixed(2)) === value, "Le montant doit comporter au maximum deux décimales."), currency: z.enum(["CDF", "USD"]), destinationType: z.enum(["bank_account", "mobile_money", "partner"]), idempotencyKey: z.string().min(8).max(160).optional() }))
       .mutation(({ ctx, input }) => createWithdrawalRequest({ userId: ctx.user.id, ...input })),
+    withdrawalEligibility: protectedProcedure.input(z.object({ currency: z.enum(["CDF", "USD"]) })).query(({ ctx, input }) => getWithdrawalEligibility(ctx.user.id, input.currency)),
   }),
   adminFunding: router({
     queue: permissionProcedure("funding.review").query(async () => {
@@ -462,15 +503,28 @@ export const appRouter = router({
         totals: { pending: deposits.length + awaitingDecision.length, deposits: deposits.length, withdrawals: awaitingDecision.length, approvedAwaitingPayout },
       };
     }),
-    decide: permissionProcedure("funding.review").input(z.object({ kind: z.enum(["deposit", "withdrawal"]), id: z.number().int().positive(), decision: z.enum(["approve", "reject"]), note: z.string().min(3).max(500), providerReference: z.string().max(180).optional(), settledAmount: z.number().positive().optional() })).mutation(async ({ ctx, input }) => {
+    feeLedger: permissionProcedure("funding.review").query(async () => {
+      const db = await getDb();
+      if (!db) return { totals: { CDF: "0.00", USD: "0.00" }, transactions: [] };
+      const [transactions, aggregateRows] = await Promise.all([
+        db.select().from(africoinFeeTransactions).orderBy(desc(africoinFeeTransactions.collectedAt), desc(africoinFeeTransactions.id)).limit(500),
+        db.select({ currency: africoinFeeTransactions.currency, total: sql<string>`CAST(ROUND(COALESCE(SUM(${africoinFeeTransactions.feeAmount}), 0), 2) AS DECIMAL(30,2))` })
+          .from(africoinFeeTransactions)
+          .groupBy(africoinFeeTransactions.currency),
+      ]);
+      const totals: Record<"CDF" | "USD", string> = { CDF: "0.00", USD: "0.00" };
+      for (const row of aggregateRows) totals[row.currency] = String(row.total ?? "0.00");
+      return { totals, transactions };
+    }),
+    completePayout: permissionProcedure("funding.review").input(z.object({ id: z.number().int().positive(), externalPayoutReference: z.string().trim().min(3).max(180), note: z.string().trim().min(3).max(500) })).mutation(({ ctx, input }) => completeWithdrawalPayout({ actorUserId: ctx.user.id, ...input })),
+    cancelPayout: permissionProcedure("funding.review").input(z.object({ id: z.number().int().positive(), note: z.string().trim().min(3).max(500) })).mutation(({ ctx, input }) => cancelApprovedWithdrawalRequest({ actorUserId: ctx.user.id, ...input })),
+    decide: permissionProcedure("funding.review").input(z.object({ kind: z.enum(["deposit", "withdrawal"]), id: z.number().int().positive(), decision: z.enum(["approve", "reject"]), note: z.string().trim().min(3).max(500), providerReference: z.string().max(180).optional(), settledAmount: z.number().positive().optional() })).mutation(async ({ ctx, input }) => {
       if (input.kind === "withdrawal") {
         return decideWithdrawalRequest({
           actorUserId: ctx.user.id,
           id: input.id,
           decision: input.decision,
           note: input.note,
-          providerReference: input.providerReference,
-          settledAmount: input.settledAmount,
         });
       }
       const db = await getDb();
@@ -554,7 +608,7 @@ export const appRouter = router({
       const userIds = Array.from(new Set(cases.map(item => item.userId)));
       const [usersRows, documents] = await Promise.all([
         userIds.length ? db.select().from(users).where(inArray(users.id, userIds)) : [],
-        cases.length ? db.select().from(kycDocuments).where(inArray(kycDocuments.kycCaseId, cases.map(item => item.id))).orderBy(desc(kycDocuments.createdAt)) : [],
+        cases.length ? db.select().from(kycDocuments).where(inArray(kycDocuments.kycCaseId, cases.map(item => item.id))).orderBy(desc(kycDocuments.createdAt), desc(kycDocuments.id)) : [],
       ]);
       return Promise.all(cases.map(async item => ({
         ...item,

@@ -47,6 +47,7 @@ export const clientProfiles = mysqlTable("client_profiles", {
   investorExperience: mysqlEnum("investorExperience", ["none", "beginner", "intermediate", "advanced"]).default("none").notNull(),
   riskProfile: mysqlEnum("riskProfile", ["unassessed", "conservative", "balanced", "growth", "speculative"]).default("unassessed").notNull(),
   riskScore: int("riskScore"),
+  avatarStorageKey: varchar("avatarStorageKey", { length: 512 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -127,14 +128,32 @@ export const withdrawalRequests = mysqlTable("withdrawal_requests", {
   userId: int("userId").notNull(),
   walletId: int("walletId").notNull(),
   amount: decimal("amount", { precision: 24, scale: 8 }).notNull(),
+  feeAmount: decimal("feeAmount", { precision: 24, scale: 8 }).default("0").notNull(),
+  payoutAmount: decimal("payoutAmount", { precision: 24, scale: 8 }).default("0").notNull(),
   currency: mysqlEnum("currency", ["CDF", "USD"]).notNull(),
   destinationType: mysqlEnum("destinationType", ["bank_account", "mobile_money", "partner"]).notNull(),
   status: mysqlEnum("status", ["requested", "pending_review", "processing", "approved_pending_payout", "completed", "rejected", "failed", "blocked"]).default("requested").notNull(),
   reference: varchar("reference", { length: 120 }).notNull().unique(),
   providerReference: varchar("providerReference", { length: 180 }),
+  payoutCompletedAt: timestamp("payoutCompletedAt"),
   complianceNote: text("complianceNote"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const africoinFeeTransactions = mysqlTable("africoin_fee_transactions", {
+  id: int("id").autoincrement().primaryKey(),
+  withdrawalRequestId: int("withdrawalRequestId").notNull().unique(),
+  userId: int("userId").notNull(),
+  withdrawalReference: varchar("withdrawalReference", { length: 120 }).notNull().unique(),
+  grossAmount: decimal("grossAmount", { precision: 24, scale: 8 }).notNull(),
+  feeAmount: decimal("feeAmount", { precision: 24, scale: 8 }).notNull(),
+  payoutAmount: decimal("payoutAmount", { precision: 24, scale: 8 }).notNull(),
+  currency: mysqlEnum("currency", ["CDF", "USD"]).notNull(),
+  externalPayoutReference: varchar("externalPayoutReference", { length: 180 }).notNull(),
+  recordedBy: int("recordedBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  collectedAt: timestamp("collectedAt").defaultNow().notNull(),
 });
 
 export const instruments = mysqlTable("instruments", {

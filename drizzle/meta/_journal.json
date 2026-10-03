@@ -113,6 +113,13 @@
       "when": 1790940462540,
       "tag": "0015_withdrawal_approval_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1791041010642,
+      "tag": "0016_africoin_withdrawal_fees_profile_pictures",
+      "breakpoints": true
     }
   ]
 }

@@ -4,7 +4,7 @@ import type { TrpcContext } from "./_core/context";
 import { buildUserAdminAudit, canChangeUserRole, canChangeUserStatus } from "./adminUsers";
 
 function context(role: "user" | "compliance" | "admin" | "super_admin" = "user"): TrpcContext {
-  return { user: { id: 900001, openId: `admin-users-${role}`, name: "Admin Users Test", email: "admin-users@example.com", loginMethod: "test", role, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: { clearCookie: () => undefined } as TrpcContext["res"] };
+  return { user: { id: 900001, openId: `admin-users-${role}`, name: "Admin Users Test", email: "admin-users@example.com", loginMethod: "test", role, createdAt: new Date(), updatedAt: new Date(), lastSignedIn: new Date() }, req: { protocol: "https", headers: {} } as TrpcContext["req"], res: { clearCookie: () => undefined } as unknown as TrpcContext["res"] };
 }
 
 describe("admin user management", () => {
@@ -52,9 +52,9 @@ describe("admin user management", () => {
     await expect(adminCaller.adminUsers.updateAccount({ userId: 999999999, name: "Compte", email: "compte@example.com", reason: "Correction contrôlée" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(adminCaller.adminUsers.deleteAccount({ userId: 999999999, reason: "Suppression contrôlée" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(adminCaller.adminUsers.adjustWallet({ userId: 999999999, currency: "USD", direction: "credit", amount: 10, reason: "Crédit contrôlé" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(superAdminCaller.adminUsers.updateAccount({ userId: 999999999, name: "Compte", email: "compte@example.com", reason: "Correction contrôlée" })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(superAdminCaller.adminUsers.deleteAccount({ userId: 999999999, reason: "Suppression contrôlée" })).rejects.toMatchObject({ code: "NOT_FOUND" });
-    await expect(superAdminCaller.adminUsers.adjustWallet({ userId: 999999999, currency: "USD", direction: "credit", amount: 10, reason: "Crédit contrôlé" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(superAdminCaller.adminUsers.updateAccount({ userId: 999999999, name: "Compte", email: "compte@example.com", reason: "Correction contrôlée" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(superAdminCaller.adminUsers.deleteAccount({ userId: 999999999, reason: "Suppression contrôlée" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(superAdminCaller.adminUsers.adjustWallet({ userId: 999999999, currency: "USD", direction: "credit", amount: 10, reason: "Crédit contrôlé" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("keeps direct status changes and admin creation reserved for Super Admin", async () => {
@@ -62,13 +62,13 @@ describe("admin user management", () => {
     const superAdminCaller = appRouter.createCaller(context("super_admin"));
     await expect(adminCaller.adminUsers.setStatusDirect({ userId: 999999999, status: "restricted", reason: "Suspension contrôlée" })).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(adminCaller.adminUsers.createAdmin({ name: "Nouvel Admin", email: "new-admin@example.com", password: "temporary-password-2026", reason: "Création contrôlée" })).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await expect(superAdminCaller.adminUsers.setStatusDirect({ userId: 999999999, status: "active", reason: "Déverrouillage contrôlé" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(superAdminCaller.adminUsers.setStatusDirect({ userId: 999999999, status: "active", reason: "Déverrouillage contrôlé" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
   it("returns a safe not-found result for an admin detail and rejects unknown mutations", async () => {
     const caller = appRouter.createCaller(context("admin"));
     await expect(caller.adminUsers.detail({ userId: 999999999 })).resolves.toBeNull();
-    await expect(caller.adminUsers.updateStatus({ userId: 999999999, status: "blocked", reason: "Risque confirmé" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(caller.adminUsers.updateStatus({ userId: 999999999, status: "blocked", reason: "Risque confirmé" })).resolves.toMatchObject({ requestId: 0, approvedCount: 0, requiredApprovals: 2, status: "pending" });
     await expect(caller.adminUsers.updateRole({ userId: 999999999, role: "user", reason: "Correction de rôle" })).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 

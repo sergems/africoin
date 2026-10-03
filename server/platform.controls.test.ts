@@ -34,7 +34,7 @@ describe("platform safety controls", () => {
     expect(externalExecutionAdapters.every(provider => provider.mode !== "live")).toBe(true);
   });
 
-  it("blocks orders before partner checks when KYC is not approved", async () => {
+  it("does not reject an order solely because KYC is not approved", async () => {
     const caller = appRouter.createCaller(userContext());
-    await expect(caller.orders.placeSpot({ instrumentId: 101, symbol: "AAPL", side: "buy", orderType: "market", quantity: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.orders.placeSpot({ instrumentId: 101, symbol: "AAPL", side: "buy", orderType: "market", quantity: 1 })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });

@@ -8,13 +8,17 @@ export function buildFundingDecisionNotification(input: {
   decision: "approve" | "reject";
   reference: string;
   note: string;
+  amount?: string;
+  feeAmount?: string;
+  payoutAmount?: string;
+  currency?: "CDF" | "USD";
 }): NotificationInsert {
   if (input.type === "withdrawal" && input.decision === "approve") {
     return {
       userId: input.userId,
       type: "withdrawal",
-      title: "Retrait approuvé · transfert non envoyé",
-      message: `${input.reference} · ${input.note} Aucun fonds n’a été réservé ou transféré; le payout Africoin reste désactivé.`,
+      title: "Retrait approuvé · paiement à réaliser",
+      message: `${input.reference} · ${input.note} Total réservé : ${input.amount ?? "—"} ${input.currency ?? ""}; frais Africoin : ${input.feeAmount ?? "—"} ${input.currency ?? ""}; montant net à verser : ${input.payoutAmount ?? "—"} ${input.currency ?? ""}. Aucun paiement n’est envoyé automatiquement; le versement externe doit être enregistré par Africoin.`,
     };
   }
   return {
@@ -29,12 +33,29 @@ export function buildWithdrawalRequestNotification(input: {
   userId: number;
   reference: string;
   amount: string;
+  feeAmount: string;
+  payoutAmount: string;
   currency: "CDF" | "USD";
 }): NotificationInsert {
   return {
     userId: input.userId,
     type: "withdrawal",
     title: "Demande de retrait enregistrée",
-    message: `${input.amount} ${input.currency} · ${input.reference} · en attente d’approbation; aucun fonds n’a été réservé ni transféré.`,
+    message: `Débit total ${input.amount} ${input.currency} · frais Africoin (2,5 %) ${input.feeAmount} ${input.currency} · net à verser ${input.payoutAmount} ${input.currency} · ${input.reference} · en attente d’approbation; le solde sera réservé à l’approbation.`,
+  };
+}
+
+export function buildWithdrawalCancelledNotification(input: {
+  userId: number;
+  reference: string;
+  amount: string;
+  currency: "CDF" | "USD";
+  note: string;
+}): NotificationInsert {
+  return {
+    userId: input.userId,
+    type: "withdrawal",
+    title: "Retrait annulé · solde libéré",
+    message: `${input.reference} · ${input.amount} ${input.currency} libérés. Aucun frais n’a été prélevé. ${input.note}`,
   };
 }

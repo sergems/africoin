@@ -28,7 +28,7 @@ export default function Market() {
   const selectedPrice = Number(marketStream.quotes[selected?.symbol ?? ""]?.price ?? selected?.price ?? 0);
   const notional = useMemo(() => selectedPrice * Number(quantity || 0), [selectedPrice, quantity]);
   const selectedWallet = dashboard?.wallets?.find(wallet => wallet.currency === selected?.quoteCurrency);
-  const tradeBlockedReason = dashboard?.kyc?.status !== "approved" ? "Votre compte doit être approuvé par la conformité avant toute opération." : Number(selectedWallet?.availableBalance ?? 0) < notional ? `Solde disponible insuffisant (${selectedWallet?.availableBalance ?? "0"} ${selected?.quoteCurrency ?? "USD"}).` : "";
+  const tradeBlockedReason = Number(selectedWallet?.availableBalance ?? 0) < notional ? `Solde disponible insuffisant (${selectedWallet?.availableBalance ?? "0"} ${selected?.quoteCurrency ?? "USD"}).` : "";
 
   return <div className="min-h-screen bg-[#f7f7f2] px-4 py-6 sm:px-8 lg:px-10"><div className="mx-auto max-w-[1500px]">
     <header className="flex flex-col gap-4 border-b border-slate-200 pb-6 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#087f78]">Marchés</p><h1 className="mt-3 text-3xl font-semibold tracking-tight text-[#0a2233]">Actions & forex spot</h1><p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">Explorez les instruments disponibles, les niveaux de risque et les cours disponibles. L’effet de levier et les CFD sont désactivés.</p></div><MarketStreamStatus connection={marketStream.connection} providerState={marketStream.providerState} message={marketStream.providerMessage} lastUpdate={marketStream.lastUpdate} /></header>

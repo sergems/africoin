@@ -3,7 +3,7 @@ import { appRouter } from "./routers";
 import { resolveTradeExecutionMode } from "./tradingGuards";
 import type { TrpcContext } from "./_core/context";
 
-function context(role: "user" | "compliance" | "admin" = "user"): TrpcContext {
+function context(role: "user" | "compliance" | "admin" | "super_admin" = "user"): TrpcContext {
   return {
     user: {
       id: 999001,
@@ -57,7 +57,7 @@ describe("AFRICOIN TRADING GROUP controls", () => {
     await expect(appRouter.createCaller(unauthenticated).wallets.requestWithdrawal({ amount: 10, currency: "USD", destinationType: "mobile_money" })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("restricts withdrawal decisions to funding reviewers and refuses manual payout confirmation", async () => {
+  it("restricts withdrawal decisions to funding reviewers and routes approval/completion into the manual payout workflow", async () => {
     const userCaller = appRouter.createCaller(context("user"));
     await expect(userCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review" })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
@@ -65,6 +65,13 @@ describe("AFRICOIN TRADING GROUP controls", () => {
     await expect(complianceCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review" })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     const adminCaller = appRouter.createCaller(context("admin"));
-    await expect(adminCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review", providerReference: "PAYOUT-123" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(adminCaller.adminFunding.decide({ kind: "withdrawal", id: 1, decision: "approve", note: "Review", providerReference: "PAYOUT-123" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(adminCaller.adminFunding.completePayout({ id: 1, externalPayoutReference: "PAYOUT-123", note: "External transfer completed" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+
+  it("allows the Super Admin KYC review route for their own record and other users", async () => {
+    const superAdminCaller = appRouter.createCaller(context("super_admin"));
+    await expect(superAdminCaller.adminUsers.reviewKyc({ userId: 999001, status: "approved", note: "Self review" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    await expect(superAdminCaller.adminUsers.reviewKyc({ userId: 999002, status: "approved", note: "User review" })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 });

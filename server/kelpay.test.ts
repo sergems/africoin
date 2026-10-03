@@ -70,11 +70,12 @@ describe("Africoin deposit status verification", () => {
     expect(result).not.toHaveProperty("transactionId");
   });
 
-  it("requires current KYC approval and an active risk limit at settlement", () => {
-    expect(isKelpaySettlementEligible("approved", "active")).toBe(true);
-    expect(isKelpaySettlementEligible("rejected", "active")).toBe(false);
-    expect(isKelpaySettlementEligible("approved", "restricted")).toBe(false);
+  it("allows provider-confirmed deposits regardless of KYC status while retaining risk and wallet checks", () => {
+    expect(isKelpaySettlementEligible("active", "active")).toBe(true);
     expect(isKelpaySettlementEligible(undefined, "active")).toBe(false);
+    expect(isKelpaySettlementEligible("restricted", "active")).toBe(false);
+    expect(isKelpaySettlementEligible("active", "restricted")).toBe(false);
+    expect(isKelpaySettlementEligible("active", "closed")).toBe(false);
   });
 
   it("limits manual provider status checks and exposes a client-safe message", () => {

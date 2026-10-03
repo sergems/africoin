@@ -3,7 +3,6 @@ import { isIP } from "node:net";
 import { and, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import {
   depositRequests,
-  kycCases,
   notifications,
   reconciliationHistory,
   reconciliationRecords,
@@ -274,8 +273,8 @@ export function toKelpayClientStatus(row: {
   };
 }
 
-export function isKelpaySettlementEligible(kycStatus: string | null | undefined, riskStatus: string | null | undefined) {
-  return kycStatus === "approved" && riskStatus === "active";
+export function isKelpaySettlementEligible(riskStatus: string | null | undefined, walletStatus: string | null | undefined) {
+  return riskStatus === "active" && walletStatus === "active";
 }
 
 async function updateReconciliation(
@@ -360,12 +359,21 @@ async function applyKelpayOutcome(reference: string, outcome: KelpayOutcome) {
 
   let credited = false;
   let complianceHeld = false;
-  const complianceHoldNote = "Africoin confirmed the payment, but the account no longer meets the current KYC/risk settlement policy; funds are held for manual compliance review.";
   await db.transaction(async tx => {
     const account = (await tx.select({ id: users.id }).from(users).where(eq(users.id, row.userId)).for("update"))[0];
-    const kyc = (await tx.select().from(kycCases).where(eq(kycCases.userId, row.userId)).orderBy(desc(kycCases.updatedAt)).limit(1).for("update"))[0];
     const limits = (await tx.select().from(riskLimits).where(eq(riskLimits.userId, row.userId)).limit(1).for("update"))[0];
-    const eligibleForSettlement = Boolean(account && isKelpaySettlementEligible(kyc?.status, limits?.status));
+    const wallet = (await tx.select().from(wallets).where(eq(wallets.id, row.walletId)).limit(1).for("update"))[0];
+    const holdReason = !account
+      ? "the account could not be verified"
+      : limits?.status !== "active"
+        ? "account risk controls are inactive or restricted"
+        : !wallet
+          ? "the destination wallet is unavailable"
+          : wallet.status !== "active"
+            ? "the destination wallet is restricted or closed"
+            : "current account controls do not allow settlement";
+    const eligibleForSettlement = Boolean(account && isKelpaySettlementEligible(limits?.status, wallet?.status));
+    const complianceHoldNote = `Africoin confirmed the payment, but ${holdReason}; funds are held for manual compliance review and were not credited.`;
     const providerReference = outcome.transactionId ?? row.providerReference ?? undefined;
     const changed = await tx.update(depositRequests).set({
       status: eligibleForSettlement ? "completed" : "pending_review",
@@ -388,7 +396,7 @@ async function applyKelpayOutcome(reference: string, outcome: KelpayOutcome) {
     const walletUpdated = await tx.update(wallets).set({
       availableBalance: sql`${wallets.availableBalance} + ${row.amount}`,
       updatedAt: new Date(),
-    }).where(eq(wallets.id, row.walletId));
+    }).where(and(eq(wallets.id, row.walletId), eq(wallets.status, "active")));
     if (!walletUpdated[0]?.affectedRows) throw new Error("The deposit wallet no longer exists.");
     await tx.insert(walletTransactions).values({
       walletId: row.walletId,

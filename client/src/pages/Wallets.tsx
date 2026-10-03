@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ArrowDownLeft, ArrowUpRight, Banknote, Clock3, LockKeyhole, ShieldCheck, WalletCards } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
+import { calculateWithdrawalAmounts } from "@shared/withdrawalFees";
 
 type Currency = "USD" | "CDF";
 
@@ -27,6 +28,7 @@ export default function Wallets() {
   const utils = trpc.useUtils();
   const { data: wallets = [] } = trpc.wallets.balances.useQuery();
   const { data: requests } = trpc.portfolio.requests.useQuery();
+  const { data: withdrawalEligibility, isLoading: eligibilityLoading } = trpc.wallets.withdrawalEligibility.useQuery({ currency: withdrawalCurrency }, { enabled: withdrawalOpen });
 
   const refreshWalletData = async () => {
     await Promise.all([utils.portfolio.requests.invalidate(), utils.wallets.balances.invalidate()]);
@@ -50,7 +52,7 @@ export default function Wallets() {
       setWithdrawalAmount("");
       setWithdrawalIdempotencyKey(crypto.randomUUID());
       await refreshWalletData();
-      toast.success(`${result.reference} · demande envoyée à l’approbation. Aucun fonds n’a été réservé ou transféré.`);
+      toast.success(`${result.reference} · total ${result.totalDebit} ${withdrawalCurrency} · frais ${result.feeAmount} · net ${result.payoutAmount}. Le montant sera réservé à l’approbation.`);
     },
     onError: error => toast.error(error.message),
   });
@@ -79,6 +81,10 @@ export default function Wallets() {
   const parsedWithdrawalAmount = Number(withdrawalAmount);
   const withdrawalAvailable = Number(walletFor(withdrawalCurrency).availableBalance);
   const validWithdrawalAmount = Number.isFinite(parsedWithdrawalAmount) && parsedWithdrawalAmount > 0 && parsedWithdrawalAmount <= 1_000_000 && Number(parsedWithdrawalAmount.toFixed(2)) === parsedWithdrawalAmount && parsedWithdrawalAmount <= withdrawalAvailable;
+  let withdrawalAmounts: ReturnType<typeof calculateWithdrawalAmounts> | null = null;
+  if (Number.isFinite(parsedWithdrawalAmount) && parsedWithdrawalAmount > 0) {
+    try { withdrawalAmounts = calculateWithdrawalAmounts(parsedWithdrawalAmount); } catch { withdrawalAmounts = null; }
+  }
 
   const startDeposit = () => {
     deposit.mutate({
@@ -101,8 +107,7 @@ export default function Wallets() {
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#087f78]">Portefeuille</p>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[#0a2233]">Vos liquidités, séparées par devise</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-              Les dépôts CDF et USD sont traités par Africoin sur Orange Money, M-PESA, Airtel Money et AfriMoney.
-              Le portefeuille est crédité uniquement après confirmation de la transaction par Africoin.
+              Vous pouvez déposer et trader pendant la revue KYC. Les dépôts CDF et USD sont crédités après confirmation Africoin; les retraits exigent un KYC approuvé et les trois justificatifs acceptés.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
@@ -144,10 +149,10 @@ export default function Wallets() {
           <Card className="rounded-2xl border-0 bg-[#0a2233] text-white">
             <CardHeader><CardTitle className="text-xl font-medium">Avant tout mouvement</CardTitle></CardHeader>
             <CardContent className="space-y-4 text-sm leading-6 text-slate-300">
-              <div className="flex gap-3"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-[#e6b93f]" /><p>Votre identité et votre profil de risque doivent être validés avant l’accès aux mouvements financiers.</p></div>
+              <div className="flex gap-3"><ShieldCheck className="mt-1 h-4 w-4 shrink-0 text-[#e6b93f]" /><p>Déposez et tradez pendant la revue de vos documents. Pour retirer, votre KYC, votre pièce d’identité, votre justificatif de domicile et votre justificatif de source des fonds doivent être acceptés.</p></div>
               <div className="flex gap-3"><Clock3 className="mt-1 h-4 w-4 shrink-0 text-[#e6b93f]" /><p>Les dépôts Africoin sont vérifiés côté serveur. Les retraits restent soumis à une décision de l’équipe Africoin, enregistrée dans l’historique.</p></div>
               <div className="rounded-2xl border border-[#e6b93f]/20 bg-[#e6b93f]/10 p-4 text-xs text-[#f7e0a4]">
-                Vous pouvez soumettre une demande de retrait à l’équipe Africoin. L’approbation ne réserve ni ne débite de fonds et n’envoie aucun transfert; le payout Africoin reste désactivé.
+                Chaque retrait comprend des frais Africoin de 2,5 % du montant débité. À l’approbation, le total est réservé; l’équipe enregistre ensuite le paiement externe avec sa référence. Aucun transfert n’est lancé automatiquement.
               </div>
             </CardContent>
           </Card>
@@ -187,7 +192,7 @@ export default function Wallets() {
             <DialogHeader>
               <DialogTitle className="text-[#0a2233]">Demander un retrait</DialogTitle>
               <DialogDescription>
-                L’équipe Africoin doit valider la demande. Les transferts Africoin sont désactivés : aucun fonds ne sera réservé, débité ou envoyé par cette demande.
+                Un KYC approuvé, les trois justificatifs requis acceptés et un compte/portefeuille actifs sont nécessaires. Le montant est réservé à l’approbation; le paiement externe est ensuite effectué manuellement par l’équipe Africoin.
               </DialogDescription>
             </DialogHeader>
             <div className="flex gap-2">
@@ -196,8 +201,13 @@ export default function Wallets() {
               ))}
             </div>
             <div>
-              <label htmlFor="withdrawal-amount" className="text-xs font-medium text-slate-600">Montant · disponible {withdrawalAvailable.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {withdrawalCurrency}</label>
+              <label htmlFor="withdrawal-amount" className="text-xs font-medium text-slate-600">Montant total débité · disponible {withdrawalAvailable.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {withdrawalCurrency}</label>
               <Input id="withdrawal-amount" type="number" min="0.01" max="1000000" step="0.01" value={withdrawalAmount} onChange={event => setWithdrawalAmount(event.target.value)} placeholder="0.00" className="mt-2" />
+            </div>
+            {withdrawalAmounts && <div className="rounded-xl border border-[#b9ded4] bg-[#e9f6f2] p-4 text-sm"><div className="flex justify-between gap-3"><span className="text-slate-600">Total débité</span><strong>{withdrawalAmounts.totalDebit} {withdrawalCurrency}</strong></div><div className="mt-2 flex justify-between gap-3"><span className="text-slate-600">Frais Africoin (2,5 %)</span><strong className="text-[#087f78]">− {withdrawalAmounts.feeAmount} {withdrawalCurrency}</strong></div><div className="mt-2 flex justify-between gap-3 border-t border-[#b9ded4] pt-2"><span className="font-medium text-[#0a2233]">Versement net</span><strong className="text-[#0a2233]">{withdrawalAmounts.payoutAmount} {withdrawalCurrency}</strong></div></div>}
+            <div className={`rounded-xl border p-3 text-xs leading-5 ${withdrawalEligibility?.eligible ? "border-[#b9ded4] bg-[#e9f6f2] text-[#087f78]" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+              {eligibilityLoading ? "Vérification des conditions de retrait…" : withdrawalEligibility?.message ?? "Les conditions de retrait sont en cours de vérification."}
+              {!withdrawalEligibility?.eligible && <a href="/documents" className="ml-1 font-semibold underline">Voir les documents requis</a>}
             </div>
             <div>
               <label htmlFor="withdrawal-destination" className="text-xs font-medium text-slate-600">Type de destination</label>
@@ -206,11 +216,11 @@ export default function Wallets() {
                 <option value="bank_account">Compte bancaire</option>
                 <option value="partner">Partenaire</option>
               </select>
-              <p className="mt-1 text-xs text-slate-500">Les coordonnées de paiement ne sont pas collectées tant que le payout Africoin n’est pas activé.</p>
+              <p className="mt-1 text-xs text-slate-500">Le versement net sera payé hors plateforme par l’équipe Africoin et rapproché avec sa référence externe.</p>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setWithdrawalOpen(false)} className="border-slate-200">Annuler</Button>
-              <Button disabled={!validWithdrawalAmount || withdrawal.isPending} onClick={startWithdrawal} className="bg-[#0a2233] text-white hover:bg-[#0d2638]">
+              <Button disabled={!validWithdrawalAmount || !withdrawalEligibility?.eligible || eligibilityLoading || withdrawal.isPending} onClick={startWithdrawal} className="bg-[#0a2233] text-white hover:bg-[#0d2638]">
                 {withdrawal.isPending ? "Enregistrement…" : "Soumettre pour approbation"}
               </Button>
             </DialogFooter>
@@ -264,13 +274,14 @@ function RequestList({ title, rows, icon, onCheck, checkingReference }: {
             <span className="min-w-0 flex-1 truncate text-slate-500">{row.reference}</span>
             <Badge variant="outline">{statusLabel(row.status, Boolean(row.destinationType))}</Badge>
             <span className="shrink-0 font-medium text-[#0a2233]">{row.amount} {row.currency}</span>
+            {row.destinationType && row.feeAmount != null && <span className="w-full text-slate-500">Frais Africoin 2,5 % : {row.feeAmount} {row.currency} · net prévu : {row.payoutAmount} {row.currency}</span>}
             {canCheck && onCheck && <Button size="sm" variant="outline" disabled={isChecking} onClick={() => onCheck(row.reference)}>{isChecking ? "Vérification…" : "Vérifier"}</Button>}
             {row.paymentProvider === "KECCEL" && row.providerStatus === "VERIFICATION_EXCEPTION" && <span className="w-full text-amber-700">Réconciliation manuelle requise ; aucun crédit effectué.</span>}
             {row.paymentProvider === "KECCEL" && row.providerStatus === "SUCCESS_COMPLIANCE_HOLD" && <span className="w-full text-amber-700">Paiement confirmé, mais fonds retenus pour revue conformité ; contactez le support.</span>}
             {row.paymentProvider === "KECCEL" && row.providerStatus === "SUBMISSION_UNKNOWN" && !row.providerReference && !row.candidateTransactionId && <span className="w-full text-amber-700">Résultat Africoin incertain. Ne lancez pas un nouveau dépôt ; contactez le support avec cette référence.</span>}
             {row.paymentProvider === "KECCEL" && ["processing", "pending_review"].includes(row.status) && Number(row.providerCheckCount ?? 0) >= 3 && <span className="w-full text-amber-700">Maximum de vérifications Africoin atteint ; contactez le support pour réconciliation. Aucun crédit n’a été effectué sans confirmation.</span>}
-            {row.destinationType && row.status === "pending_review" && <span className="w-full text-amber-700">En attente de validation par Africoin. Aucun fonds n’a été réservé ni transféré.</span>}
-            {row.destinationType && row.status === "approved_pending_payout" && <span className="w-full text-amber-700">Validé par Africoin; aucun transfert envoyé et aucun solde modifié. Les transferts Africoin restent désactivés.</span>}
+            {row.destinationType && row.status === "pending_review" && <span className="w-full text-amber-700">En attente de validation par Africoin. Le montant reste disponible jusqu’à l’approbation.</span>}
+            {row.destinationType && row.status === "approved_pending_payout" && <span className="w-full text-amber-700">Approuvé : le montant total est réservé. Le paiement externe attend la confirmation manuelle d’Africoin.</span>}
           </div>
         );
       }) : <p className="mt-3 text-xs text-slate-400">Aucune demande enregistrée.</p>}
@@ -279,11 +290,11 @@ function RequestList({ title, rows, icon, onCheck, checkingReference }: {
 }
 
 function statusLabel(status: string, isWithdrawal = false) {
-  if (isWithdrawal && status === "approved_pending_payout") return "Approuvé · payout désactivé";
+  if (isWithdrawal && status === "approved_pending_payout") return "Approuvé · paiement à confirmer";
   if (isWithdrawal && ["requested", "pending_review"].includes(status)) return "À approuver";
   switch (status) {
     case "completed": return "Confirmé";
-    case "failed": return isWithdrawal ? "Échec de la demande" : "Échoué";
+    case "failed": return isWithdrawal ? "Annulé · solde libéré" : "Échoué";
     case "rejected": return isWithdrawal ? "Refusé par Africoin" : "Refusé";
     case "processing": return "En cours";
     case "pending_review": return "À vérifier";
