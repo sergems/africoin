@@ -38,12 +38,17 @@
 
 ### Verification evidence
 
-
-
-### Verification evidence
-
 - TypeScript check passed.
-- Vitest passed: 19 files, 84 tests.
+- Vitest passed: 20 files, 89 tests.
 - Production build passed; it reports non-blocking analytics-placeholder and large-chunk warnings.
 - Preview health and route-manifest endpoints returned HTTP 200; the manifest matches all 18 declared page routes.
 - The separately operated production database was not configured, connected to, or migrated in this task.
+
+
+## Requested Preview no-KYC flow QA
+
+- [x] **Registration and authenticated Preview session:** A new synthetic test user can register without KYC documents, sign in over the public HTTPS Preview origin, and remain authenticated on the protected dashboard; the account’s KYC state stays not started/pending. **Observed:** registration succeeded; the app-owned cookie rename and HTTPS flags fixed persistence across dashboard, documents, wallet, and market routes. The Documents page showed no uploaded KYC documents.
+- [x] **Pre-KYC deposit boundary:** With KYC incomplete, the deposit path does not return a KYC denial. Since Preview has no `KECCEL_*` payment secrets, it must stop at the provider-configuration precondition before writing a payment request or contacting an external payment provider; do not send or simulate a payment. **Observed:** the deposit form was available and the API returned “Le service de dépôt Africoin n’est pas configuré”; no request was created and no payment was sent. A successful provider-backed deposit remains untestable until the Preview provider is configured.
+- [x] **Pre-KYC trade boundary:** With KYC incomplete, the trade path does not return a KYC denial and retains active-risk, market, wallet, notional, position, and available-balance safeguards. Use no fake wallet credit; an empty test wallet may block execution for insufficient funds. **Observed:** the EUR/USD trade ticket opened without a KYC denial; it was disabled for zero available USD. Activity showed KYC `not_started`, 0 orders, and 0 transactions after the attempt.
+- A synthetic Preview test account remains in the WebDev-managed database with zero balance and no KYC documents. No live payment or broker action was performed.
+- The cookie regression tests pass for the platform-reserved-name avoidance, public HTTPS Preview, forwarded HTTPS, and local HTTP cases.

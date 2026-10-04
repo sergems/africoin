@@ -21,7 +21,7 @@
 
 ### Withdrawal hold, payout record, and fee ledger
 
-- Add additive schema fields for the calculated fee and net payout on a withdrawal request, plus an Africoin fee-ledger table keyed uniquely to the settled withdrawal. No existing table or user record will be dropped or rewritten.
+- Add additive schema fields for the calculated fee and net payout on a withdrawal request, plus an Africoin fee-ledger table keyed uniquely to the settled withdrawal. No table is dropped; existing withdrawals receive a one-time backfill to initialize the new payout amount, without retroactively charging fees.
 - At request time, calculate the fee using integer minor-unit rounding, verify eligibility and sufficient available funds, and show the estimate. Do not collect a fee or credit the treasury at request time.
 - At approval, re-check eligibility and balance atomically, then move the full gross amount from available balance to pending balance to prevent double-spending while staff completes the off-platform transfer. On rejection/cancellation before payout, release that hold; no fee is collected.
 - Add a staff-only manual completion action for an approved withdrawal. Require an external transfer reference; atomically consume the held gross amount, record a user withdrawal debit for the 97.5% payout and a separate 2.5% fee debit, create one Africoin ledger credit in the same currency, update reconciliation/audit/notifications, and prevent duplicate settlement. Recheck withdrawal eligibility before completion. Do not create a network payment call.
@@ -55,3 +55,12 @@
 ## Existing production database boundary
 
 The approved WebDev-managed database is shared between development/Preview and any WebDev-published runtime; the WebDev platform does not provide a separate managed staging database. This work may migrate that project-managed database when Preview starts. Do not request or set the separately operated production `DATABASE_URL`, connect this Sandbox to it, or run migrations against it, and do not publish/deploy from this task. The existing server startup calls `runDatabaseMigrations()` automatically: after the user deploys this code, that existing hook will apply checked-in migrations to whichever database the production runtime is configured to use. The new Drizzle migration is additive (new table, nullable/zero-default columns, and a backfill of existing payout amounts); it does not drop tables or erase existing user data. The user should review/backup their existing production database under their own release process before deploying.
+
+
+## Preview no-KYC flow QA follow-up
+
+- Renamed the platform-reserved `app_session_id` cookie to `africoin_user_session`. Cookie tests verify `SameSite=None; Secure` for public HTTPS Preview requests despite the internal HTTP listener, and plain local HTTP retains `SameSite=Lax; Secure=false`.
+- Registered a synthetic `@example.test` user in Preview and confirmed its authenticated session persists across `/dashboard`, `/documents`, `/wallets`, and `/market`. The Documents page showed no uploaded KYC documents, and Activity showed KYC `not_started`; no KYC documents or funds were added.
+- The deposit form was available without KYC. The Preview request stopped with “Le service de dépôt Africoin n’est pas configuré” because no `KECCEL_*` credentials are configured. The server checks provider configuration before writing a request or contacting the provider; no deposit was created and no payment was sent.
+- The EUR/USD spot trade ticket was available without a KYC denial, but was blocked because the synthetic account’s USD balance is zero. Activity subsequently showed 0 orders and 0 transactions; no order or fake wallet credit was created. Existing API and unit tests verify the KYC-independent server guard while retaining risk, market, wallet, notional, and available-balance safeguards.
+- Final verification: TypeScript check passed; Vitest passed 20 files/89 tests; production build passed with non-blocking analytics-placeholder and large-chunk warnings; Preview health and the 18-route manifest returned HTTP 200. The synthetic account remains in the WebDev-managed database with zero balance and no KYC documents.
