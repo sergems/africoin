@@ -56,9 +56,10 @@ import {
 import { getProviderRegistry } from "./providers";
 import { buildFundingDecisionNotification } from "./notificationService";
 import { cancelApprovedWithdrawalRequest, completeWithdrawalPayout, createWithdrawalRequest, decideWithdrawalRequest, getWithdrawalEligibility, isWithdrawalAwaitingAdminReview } from "./withdrawals";
-import { storageGetSignedUrl, storagePut } from "./storage";
+import { storageGetSignedUrl } from "./storage";
 import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES } from "./profileMedia";
 import { deleteLocalProfilePicture, isLocalProfilePictureKey, localProfilePictureUrl, saveLocalProfilePicture } from "./profilePictureStore";
+import { deleteLocalKycDocument, detectKycDocumentMimeType, kycDocumentUrl, MAX_KYC_DOCUMENT_BYTES, saveLocalKycDocument } from "./kycDocumentStore";
 import { adjustAdminUserWallet, createAdminAccount, deleteAdminUser, getAdminUserDetail, listAdminUsers, requestAdminUserRole, requestAdminUserStatus, reviewAdminUserKyc, setSuperAdminUserStatus, updateAdminUserAccount } from "./adminUsers";
 import { createApprovalRequest, decideApproval, listApprovalRequests } from "./adminApprovals";
 import { hashPassword, normalizeEmail, verifyPassword } from "./localAuth";
@@ -146,23 +147,30 @@ export const appRouter = router({
       const current = (await db.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.updatedAt)).limit(1))[0];
       if (!current) return { case: null, documents: [] };
       const rows = await db.select().from(kycDocuments).where(eq(kycDocuments.kycCaseId, current.id)).orderBy(desc(kycDocuments.createdAt), desc(kycDocuments.id));
-      return { case: current, documents: await Promise.all(rows.map(async row => ({ ...row, url: await storageGetSignedUrl(row.storageKey).catch(() => null) }))) };
+      return { case: current, documents: rows.map(({ storageKey: _storageKey, ...row }) => ({ ...row, url: kycDocumentUrl(row.id) })) };
     }),
     uploadDocument: protectedProcedure.input(z.object({ documentType: z.enum(["identity", "address", "source_of_funds", "corporate", "other"]), fileName: z.string().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "application/pdf"]), base64: z.string().min(16).max(14000000) })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
       if (!db) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "La base de données est requise pour envoyer un document." });
+      const bytes = Buffer.from(input.base64, "base64");
+      if (bytes.length > MAX_KYC_DOCUMENT_BYTES) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Document trop volumineux." });
+      if (!bytes.length || detectKycDocumentMimeType(bytes) !== input.mimeType) throw new TRPCError({ code: "BAD_REQUEST", message: "Le contenu du fichier ne correspond pas à son format déclaré." });
       const existing = await db.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.createdAt)).limit(1);
       let kycCase = existing[0];
       if (!kycCase) { await db.insert(kycCases).values({ userId: ctx.user.id, status: "pending", riskLevel: "medium" }); kycCase = (await db.select().from(kycCases).where(eq(kycCases.userId, ctx.user.id)).orderBy(desc(kycCases.createdAt)).limit(1))[0]; }
       if (!kycCase) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Dossier KYC indisponible." });
-      const bytes = Buffer.from(input.base64, "base64");
-      if (bytes.length > 10 * 1024 * 1024) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "Document trop volumineux." });
-      const stored = await storagePut(`private-kyc/${ctx.user.id}/${input.fileName}`, bytes, input.mimeType);
-      await db.insert(kycDocuments).values({ kycCaseId: kycCase.id, documentType: input.documentType, fileName: input.fileName, storageKey: stored.key, mimeType: input.mimeType, status: "uploaded" });
+      const safeFileName = input.fileName.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 255) || "document";
+      const stored = await saveLocalKycDocument(ctx.user.id, kycCase.id, bytes, input.mimeType);
+      try {
+        await db.insert(kycDocuments).values({ kycCaseId: kycCase.id, documentType: input.documentType, fileName: safeFileName, storageKey: stored.key, mimeType: input.mimeType, status: "uploaded" });
+      } catch (error) {
+        await deleteLocalKycDocument(stored.key, ctx.user.id, kycCase.id).catch(() => false);
+        throw error;
+      }
       if (kycCase.status !== "approved") await db.update(kycCases).set({ status: "pending" }).where(eq(kycCases.id, kycCase.id));
-      await db.insert(notifications).values({ userId: ctx.user.id, type: "kyc", title: "Document KYC reçu", message: `${input.fileName} a été enregistré pour revue.` });
+      await db.insert(notifications).values({ userId: ctx.user.id, type: "kyc", title: "Document KYC reçu", message: `${safeFileName} a été enregistré pour revue.` });
       await writeAuditLog({ actorUserId: ctx.user.id, action: "kyc.document_uploaded", entityType: "kyc_document", entityId: String(kycCase.id), metadata: { documentType: input.documentType, mimeType: input.mimeType } });
-      return { status: "uploaded" as const, mode: "pending_activation" as const, key: stored.key };
+      return { status: "uploaded" as const, mode: "pending_activation" as const };
     }),
   }),
   notifications: router({
@@ -629,11 +637,11 @@ export const appRouter = router({
         userIds.length ? db.select().from(users).where(inArray(users.id, userIds)) : [],
         cases.length ? db.select().from(kycDocuments).where(inArray(kycDocuments.kycCaseId, cases.map(item => item.id))).orderBy(desc(kycDocuments.createdAt), desc(kycDocuments.id)) : [],
       ]);
-      return Promise.all(cases.map(async item => ({
+      return cases.map(item => ({
         ...item,
         user: usersRows.find(user => user.id === item.userId) ?? null,
-        documents: await Promise.all(documents.filter(document => document.kycCaseId === item.id).map(async document => ({ ...document, url: await storageGetSignedUrl(document.storageKey).catch(() => null) }))),
-      })));
+        documents: documents.filter(document => document.kycCaseId === item.id).map(({ storageKey: _storageKey, ...document }) => ({ ...document, url: kycDocumentUrl(document.id) })),
+      }));
     }),
     reviewDocument: requireCompliance.input(z.object({ documentId: z.number().int().positive(), status: z.enum(["accepted", "rejected"]), note: z.string().trim().min(3).max(500) })).mutation(async ({ ctx, input }) => {
       const db = await getDb();

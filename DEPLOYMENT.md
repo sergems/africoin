@@ -8,7 +8,7 @@ The project now contains a multi-stage `Dockerfile`, a private MySQL Compose sta
 
 The Node server now binds to `HOST` and `PORT`, defaults to `0.0.0.0:3000` in production, trusts one reverse-proxy hop, disables the Express `X-Powered-By` header, and exposes `GET /api/health`. Development mode still searches for a free port so the WebDev preview is not disrupted.
 
-The application is a single Node process. It serves the built React/Vite frontend, tRPC under `/api/trpc`, the health endpoint at `/api/health`, the Forge storage proxy under `/manus-storage/*`, authenticated profile-picture reads under `/api/profile-pictures/*`, and the WebSocket market stream at `/api/market-stream`. New profile pictures are saved under a persistent host directory; KYC documents continue to use Forge-backed storage.
+The application is a single Node process. It serves the built React/Vite frontend, tRPC under `/api/trpc`, the health endpoint at `/api/health`, the Forge storage proxy under `/manus-storage/*`, authenticated profile-picture reads under `/api/profile-pictures/*`, authenticated KYC-document reads under `/api/kyc-documents/*`, and the WebSocket market stream at `/api/market-stream`. New profile pictures and KYC documents are saved under separate persistent host directories; a server-side Forge fallback remains only for legacy KYC records until they are migrated.
 
 ## B. Exact production architecture
 
@@ -89,15 +89,39 @@ Required values are:
 | `HOST`                | Set to `0.0.0.0` inside the app container.                                                                                                        |
 | `APP_PORT`            | Host-only published port, normally `3000`.                                                                                                        |
 
-Optional values are `BUILT_IN_FORGE_API_URL` and `BUILT_IN_FORGE_API_KEY` for the storage proxy, owner notifications, maps, and image services. The Vite build-time values `VITE_FRONTEND_FORGE_API_URL`, `VITE_FRONTEND_FORGE_API_KEY`, `VITE_ANALYTICS_ENDPOINT`, and `VITE_ANALYTICS_WEBSITE_ID` are also optional. Only put a browser-safe key in a `VITE_*` variable because Vite embeds these values in the browser bundle.
+`BUILT_IN_FORGE_API_URL` and `BUILT_IN_FORGE_API_KEY` are not needed for new profile-picture or KYC-document uploads. They may still be used by other optional services and are temporarily needed to read/copy previously Forge-backed KYC documents until migration is complete. The Vite build-time values `VITE_FRONTEND_FORGE_API_URL`, `VITE_FRONTEND_FORGE_API_KEY`, `VITE_ANALYTICS_ENDPOINT`, and `VITE_ANALYTICS_WEBSITE_ID` are also optional. Only put a browser-safe key in a `VITE_*` variable because Vite embeds these values in the browser bundle.
 
-`PROFILE_PICTURE_STORAGE_HOST_DIR` optionally changes the host directory used for new profile pictures; its default is `/var/lib/africoin/profile-pictures`. Create it before starting the app and grant it to the runtime `node` user (UID/GID 1000):
+`PROFILE_PICTURE_STORAGE_HOST_DIR` and `KYC_DOCUMENT_STORAGE_HOST_DIR` optionally change the host directories used for user media; the defaults are `/var/lib/africoin/profile-pictures` and `/var/lib/africoin/kyc-documents`. Create both before starting the app and grant them to the runtime `node` user (UID/GID 1000):
 
 ```bash
-install -d -o 1000 -g 1000 -m 750 /var/lib/africoin/profile-pictures
+install -d -o 1000 -g 1000 -m 750 /var/lib/africoin/profile-pictures /var/lib/africoin/kyc-documents
 ```
 
-The app container mounts this directory at `/var/lib/africoin/profile-pictures`. Do not place it under the disposable container filesystem. KYC documents still use the configured Forge storage service and are not moved by this avatar change.
+The app container bind-mounts both folders; do not store either type of file only in the disposable container filesystem. New KYC documents are validated and written under the Linode KYC folder, with per-user/per-case subdirectories and restrictive permissions. The database stores an opaque local key, not an absolute filesystem path. Access is served through an authenticated endpoint for the owner and users with the KYC-review permission; do not expose these host paths through Nginx or a static-file server. Files are plaintext on disk, so restrict host/snapshot/backup access and use encrypted-volume protection if required by your compliance policy.
+
+Keep the host directory settings stable after files are written. If a path must change, stop the app and copy the entire folder—including the migration manifest—with ownership and permissions preserved before changing the Compose source path.
+
+For existing KYC records whose files are still in Forge, the app keeps a temporary server-side read fallback. First run the read-only preview:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm --no-deps app node dist/migrateKycDocumentsToLocal.js --dry-run
+```
+
+If legacy records exist, take a fresh verified database backup and archive both local folders immediately before applying. The apply step needs the existing Forge URL/key temporarily; it updates each database key only after the local file is safely written, is safe to resume, and never deletes the old Forge object:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm --no-deps app node dist/migrateKycDocumentsToLocal.js --apply
+```
+
+If the credentials are unavailable, the utility makes no changes and cannot copy those old files; new uploads still work locally. No database schema migration is needed. The old Forge copies are deliberately retained for rollback; remove them only under a separately reviewed retention procedure after verifying the local copies and backups.
+
+Before reverting application code after a completed key migration, run the utility’s guarded pointer rollback while the current image is still available:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm --no-deps app node dist/migrateKycDocumentsToLocal.js --rollback
+```
+
+This restores only keys recorded in the private manifest and keeps both file copies. It refuses rollback if KYC documents were uploaded locally after the migration and are not in the manifest; keep the current code running and roll forward or resolve those records rather than deploying code that cannot read them.
 
 `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_ROLE` are optional one-time bootstrap values. The bootstrap script requires a password of at least 12 characters. `ADMIN_ROLE` defaults to `admin`; set it to `super_admin` when creating the platform owner account. Remove these temporary values from `.env` after running the bootstrap command.
 
@@ -438,17 +462,20 @@ Backups are written to `backups/` with mode `600`. Copy them off the Linode serv
 scp root@45.79.210.216:/opt/africoin/backups/africoin-*.sql.gz ./africoin-backups/
 ```
 
-The database backup helper does **not** include profile-picture files. Back up that directory separately, restrict the archive permissions, and copy it to the same protected backup destination:
+The database backup helper does **not** include profile-picture or KYC files. Back up both folders separately in a restricted archive, and copy it to the same protected backup destination:
 
 ```bash
-tar -C /var/lib/africoin -czf "/opt/africoin/backups/profile-pictures-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" profile-pictures
-chmod 600 /opt/africoin/backups/profile-pictures-*.tar.gz
+tar -C /var/lib/africoin -czf "/opt/africoin/backups/private-user-files-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" profile-pictures kyc-documents
+chmod 600 /opt/africoin/backups/private-user-files-*.tar.gz
 ```
+
+This archive includes `migration-manifest.jsonl`; keep it protected with the document files because it contains old and local storage keys used for a possible pointer rollback. Keep the database dump and file archive from the same backup point together.
 
 Check that a backup exists and is non-empty:
 
 ```bash
 find /opt/africoin/backups -maxdepth 1 -type f -name '*.sql.gz' -printf '%TY-%Tm-%Td %TH:%TM %s %p\n' | sort
+find /opt/africoin/backups -maxdepth 1 -type f -name 'private-user-files-*.tar.gz' -printf '%TY-%Tm-%Td %TH:%TM %s %p\n' | sort
 ```
 
 Create a backup before every production migration and keep multiple historical copies.
@@ -461,11 +488,13 @@ Restoration replaces rows in the selected database. Stop the application first s
 cd /opt/africoin
 docker compose --env-file .env -f deploy/docker-compose.yml stop app
 CONFIRM_RESTORE=YES ./deploy/scripts/restore.sh /opt/africoin/backups/africoin-YYYYMMDDTHHMMSSZ.sql.gz
+tar -C /var/lib/africoin -xzf /opt/africoin/backups/private-user-files-YYYYMMDDTHHMMSSZ.tar.gz
+chown -R 1000:1000 /var/lib/africoin/profile-pictures /var/lib/africoin/kyc-documents
 docker compose --env-file .env -f deploy/docker-compose.yml up -d app
 curl --fail http://127.0.0.1:${APP_PORT:-3000}/api/health
 ```
 
-Do not restore an untrusted dump. Keep the original backup until the application has been verified.
+Restore the matching private-file archive as well as the database dump; a newer archive may not contain files referenced by an older database. Do not restore an untrusted dump. Keep the original backups until the application has been verified.
 
 ## P. Troubleshooting
 
@@ -671,7 +700,7 @@ ls -l .env backups
 
 **Symptom:** Uploads fail or Nginx returns `413 Request Entity Too Large`.
 
-**Cause:** Nginx or Express has a smaller request limit, the local profile-picture directory is not writable, or the Forge storage service required for KYC-document uploads is not configured.
+**Cause:** Nginx or Express has a smaller request limit, either local upload directory is not writable, or a legacy KYC record still needs its previous Forge object before migration.
 
 **Command to check:**
 
@@ -680,7 +709,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs --tail=200 app
 grep client_max_body_size /etc/nginx/sites-enabled/africoin
 ```
 
-**Solution:** The current app allows 50 MB in Express and the supplied Nginx config allows 50 MB. For profile pictures, verify that the host directory exists and is owned by UID/GID 1000. KYC document uploads still require both Forge variables; check app logs for storage errors.
+**Solution:** The current app allows 50 MB in Express and the supplied Nginx config allows 50 MB; individual profile pictures are limited to 5 MiB and KYC documents to 10 MiB. Verify both host directories exist and are owned by UID/GID 1000. New KYC uploads do not require Forge; temporarily retain its credentials only if legacy KYC files still need to be read or copied, or another app feature uses Forge. Check app logs for local permission errors.
 
 ### WebSocket connection errors
 
@@ -775,4 +804,4 @@ A future GitHub Actions workflow may SSH to the Linode server using repository s
 
 ## Assumptions and remaining manual steps
 
-This guide assumes the Linode server is a fresh Ubuntu host and that the application will use the self-hosted MySQL 8.4 service supplied by Compose. It also assumes the GitHub repository is accessible from the server. You must supply the real domain, DNS record, production secrets, and optional Forge credentials. You must install Nginx and Certbot on the host and replace the placeholder domain in the Nginx configuration. New profile pictures use the persistent host folder described above and no longer need Forge credentials; KYC document uploads and other Forge-backed features still require the corresponding Forge configuration.
+This guide assumes the Linode server is a fresh Ubuntu host and that the application will use the self-hosted MySQL 8.4 service supplied by Compose. It also assumes the GitHub repository is accessible from the server. You must supply the real domain, DNS record, production secrets, and any optional Forge credentials needed for legacy-file migration or other Forge-backed features. You must install Nginx and Certbot on the host and replace the placeholder domain in the Nginx configuration. New profile pictures and KYC documents use their persistent host folders and do not need Forge credentials.

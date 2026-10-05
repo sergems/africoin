@@ -42,10 +42,14 @@ services:
       BUILT_IN_FORGE_API_URL: ${BUILT_IN_FORGE_API_URL:-}
       BUILT_IN_FORGE_API_KEY: ${BUILT_IN_FORGE_API_KEY:-}
       PROFILE_PICTURE_STORAGE_DIR: /var/lib/africoin/profile-pictures
+      KYC_DOCUMENT_STORAGE_DIR: /var/lib/africoin/kyc-documents
     volumes:
       - type: bind
         source: ${PROFILE_PICTURE_STORAGE_HOST_DIR:-/var/lib/africoin/profile-pictures}
         target: /var/lib/africoin/profile-pictures
+      - type: bind
+        source: ${KYC_DOCUMENT_STORAGE_HOST_DIR:-/var/lib/africoin/kyc-documents}
+        target: /var/lib/africoin/kyc-documents
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
 

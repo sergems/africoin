@@ -8,7 +8,7 @@
 - The amount entered for a withdrawal is the **total wallet debit**. The 2.5% Africoin fee is deducted from it; the external payout amount is 97.5% of the total, rounded to the currency’s two decimal places.
 - Preserve the current absence of automatic payouts. Add a manual, audited completion step: an authorized staff member records an external payout reference after the off-platform payout is actually completed. Only then is the withdrawal finalized and its fee credited to Africoin’s internal fee ledger in the withdrawal currency. No payment is initiated by the application.
 - Enable the approved managed WebDev database/server for this WebDev project. The platform shares that database between development/Preview and a WebDev-published runtime. Use it for this project’s Preview work, but do not connect to, migrate, or modify the user’s separately operated existing production database. Keep changes additive; the app’s existing startup hook applies checked-in Drizzle migrations to whichever database each runtime is configured to use. Do not publish or deploy this task; when the user later deploys to production, they should review and back up that database first.
-- Store new private profile pictures in a persistent per-user server directory, retain read compatibility for older Forge-backed avatar keys, and serve local images only to the authenticated owner. KYC documents remain Forge-backed and are not migrated by this change.
+- Store private profile pictures and new KYC documents in separate persistent server directories, with restrictive per-user/per-case folders and authenticated same-origin reads. Retain compatibility for older Forge-backed avatar and KYC keys during the transition. Provide an explicit dry-run/apply migration utility for existing KYC file references; it copies files and updates database keys, never deletes the old source objects, and is not run automatically.
 
 ## Implementation approach
 
@@ -33,6 +33,12 @@
 - Add an upload/update control and preview in Settings and use the user’s image in the dashboard avatar with the existing initials fallback. This is an optional profile field, not a KYC prerequisite.
 - Update French UI copy in Documents, Wallets, Market, Home, and Settings so users understand they can register/deposit/trade before KYC, while withdrawals require approved KYC plus all three accepted documents. Display the 2.5% fee and net payout before submitting a withdrawal.
 
+### Private KYC document storage
+
+- Validate PDF/JPEG/PNG signatures and the 10 MiB server-side limit; write new documents under a configurable Linode-mounted directory using opaque per-user/per-case keys and restrictive file/directory permissions. Do not return storage paths or Forge signed URLs to clients.
+- Serve documents only to their owner or a role with `kyc.review`, using no-store responses. Keep a server-side compatibility reader for legacy Forge keys only until the optional migration has copied existing records.
+- Package a read-only dry run and explicit `--apply` migration command in the production image. It copies each legacy file, updates that record’s key only after the copy succeeds, is resumable, reports failures without logging credentials, and never deletes the source. No schema migration is required; database and file backups are required before applying it.
+
 ## Design direction
 
 - **Design movement:** restrained Pan-African fintech, continuing the existing Africoin institutional dashboard rather than introducing a new visual system.
@@ -49,7 +55,7 @@
 
 - `drizzle/schema.ts` and a generated additive migration: profile image key, withdrawal fee/payout fields, and Africoin fee ledger.
 - `server/tradingGuards.ts`, `server/kelpay.ts`, `server/routers.ts`, and `server/withdrawals.ts`: centralized eligibility changes, deposit/trade access, withdrawal lifecycle, fee accounting, and authorized API procedures.
-- `server/profilePictureStore.ts`, `server/_core/profilePictureRoute.ts`, and `deploy/docker-compose.yml`: local private avatar files, authenticated retrieval, and a persistent host-directory mount. This follow-up adds no database migration; avatar files require separate backups from MySQL.
+- `server/profilePictureStore.ts`, `server/_core/profilePictureRoute.ts`, `server/kycDocumentStore.ts`, `server/legacyKycDocument.ts`, `server/_core/kycDocumentRoute.ts`, and `server/migrateKycDocumentsToLocal.ts`: private local uploads, authenticated retrieval, legacy KYC copy, and persistent host-directory mounts. These storage changes add no database schema migration; both folders require separate backups from MySQL.
 - `client/src/pages/Wallets.tsx`, `client/src/pages/Admin.tsx`, `client/src/pages/Documents.tsx`, `client/src/pages/Market.tsx`, `client/src/pages/Home.tsx`, `client/src/pages/Settings.tsx`, and `client/src/components/DashboardLayout.tsx`: customer guidance, fee preview, staff completion/reporting, and avatar controls.
 - Focused unit/contract tests alongside the existing server tests; existing application structure and UI primitives remain in use.
 
@@ -57,7 +63,7 @@
 
 The approved WebDev-managed database is shared between development/Preview and any WebDev-published runtime; the WebDev platform does not provide a separate managed staging database. This work may migrate that project-managed database when Preview starts. Do not request or set the separately operated production `DATABASE_URL`, connect this Sandbox to it, or run migrations against it, and do not publish/deploy from this task. The existing server startup calls `runDatabaseMigrations()` automatically: after the user deploys this code, that existing hook will apply checked-in migrations to whichever database the production runtime is configured to use. The new Drizzle migration is additive (new table, nullable/zero-default columns, and a backfill of existing payout amounts); it does not drop tables or erase existing user data. The user should review/backup their existing production database under their own release process before deploying.
 
-The local-avatar storage follow-up adds no schema migration and does not change KYC document storage. Production deployment must create a persistent host directory writable by the container’s `node` user and back up that directory separately from the database.
+The local-media storage follow-up adds no schema migration. New KYC uploads are local; an explicit one-time migration can copy older Forge-backed files and update their keys without deleting the sources. Production deployment must create both persistent host directories writable by the container’s `node` user, back them up separately from MySQL, and run the migration only after a verified database/file backup. Legacy files remain Forge-backed until that migration succeeds.
 
 
 ## Preview no-KYC flow QA follow-up
