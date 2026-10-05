@@ -30,7 +30,7 @@
 
 - [x] **Super Admin KYC review, including self-review:** “The super admin must be able to KYC and approve himself and other users.” Preserve the existing audited Super Admin KYC review path for the reviewer’s own account and other users.
 - [x] **Registration, deposits, and trading before KYC completion:** “new users should be able to register and transact, deposit, trade even if kyc and other documents are still outstanding.” KYC/document incompleteness alone must not block registration, trading, deposit requests, or crediting a provider-confirmed deposit; existing account/risk limits, wallet status, balance, and payment-provider safeguards remain in force.
-- [x] **Profile picture:** “They should be able to update their profile picture and start transacting.” A signed-in user can upload/change an optional private JPEG/PNG profile picture, see it in their profile and dashboard avatar, and does not have to finish KYC first.
+- [x] **Profile picture:** “They should be able to update their profile picture and start transacting.” A signed-in user can upload/change an optional private JPEG/PNG profile picture, see it in their profile and dashboard avatar, and does not have to finish KYC first. New photos are stored in a persistent per-user server folder and served only to the authenticated owner; old Forge-backed avatar keys remain readable when configured. KYC documents remain Forge-backed and are not migrated.
 - [x] **Withdrawal eligibility:** “when it comes to withdrawal, if KYC and all the requirements are not met, the user should not be allowed to withdraw.” Require approved KYC, accepted identity, address, and source-of-funds documents, and active/unblocked account, wallet, and risk limits. An approved KYC status without the three accepted documents does not permit withdrawal.
 - [x] **2.5% withdrawal fee and Africoin ledger:** “all withdrawal with incure a 2.5% fee paid to Africoin's account, which the admin and super admin should be able to see as transaction fee.” The entered withdrawal amount is the total wallet debit; deduct the 2.5% fee from it and calculate a 97.5% payout. Record the fee in a same-currency internal Africoin ledger, visible as a transaction fee to Admin and Super Admin, only after staff records successful off-platform payout completion with an external reference; the app does not send money automatically. Rejected/cancelled requests do not collect a fee.
 - [x] **Safe manual settlement:** Staff approval rechecks eligibility and places the full withdrawal amount on hold so it cannot be double-spent; staff records an external reference to complete the payout; rejection/cancellation before payout releases the hold; duplicate settlement is prevented and actions remain audited.
@@ -52,3 +52,16 @@
 - [x] **Pre-KYC trade boundary:** With KYC incomplete, the trade path does not return a KYC denial and retains active-risk, market, wallet, notional, position, and available-balance safeguards. Use no fake wallet credit; an empty test wallet may block execution for insufficient funds. **Observed:** the EUR/USD trade ticket opened without a KYC denial; it was disabled for zero available USD. Activity showed KYC `not_started`, 0 orders, and 0 transactions after the attempt.
 - A synthetic Preview test account remains in the WebDev-managed database with zero balance and no KYC documents. No live payment or broker action was performed.
 - The cookie regression tests pass for the platform-reserved-name avoidance, public HTTPS Preview, forwarded HTTPS, and local HTTP cases.
+
+## Profile-picture local-storage follow-up
+
+- [x] New profile-picture uploads no longer require Forge storage credentials; save validated JPEG/PNG files with restrictive file/directory permissions beneath a configurable server directory, preserve legacy Forge avatar reads, and return only an owner-authenticated same-origin image URL.
+- [x] Bind the container storage path to `/var/lib/africoin/profile-pictures` on the host by default; document UID/GID 1000 ownership and separate file backups. Do not migrate KYC documents.
+- [x] Mark deployment/backup/restore scripts executable in Git so the documented `./deploy.sh` and helper invocations work after checkout.
+
+### Verification evidence
+
+- `pnpm check` passed.
+- Vitest passed: 21 test files, 93 tests (including four local avatar-store tests).
+- `pnpm build` passed with only the existing analytics-placeholder and large-chunk warnings.
+- `git diff --check` passed. Compose YAML parsed successfully and its avatar bind mount was asserted with PyYAML; Docker is not installed in the Sandbox, so `docker compose config -q` could not be run here.

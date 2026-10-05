@@ -8,7 +8,7 @@
 - The amount entered for a withdrawal is the **total wallet debit**. The 2.5% Africoin fee is deducted from it; the external payout amount is 97.5% of the total, rounded to the currency’s two decimal places.
 - Preserve the current absence of automatic payouts. Add a manual, audited completion step: an authorized staff member records an external payout reference after the off-platform payout is actually completed. Only then is the withdrawal finalized and its fee credited to Africoin’s internal fee ledger in the withdrawal currency. No payment is initiated by the application.
 - Enable the approved managed WebDev database/server for this WebDev project. The platform shares that database between development/Preview and a WebDev-published runtime. Use it for this project’s Preview work, but do not connect to, migrate, or modify the user’s separately operated existing production database. Keep changes additive; the app’s existing startup hook applies checked-in Drizzle migrations to whichever database each runtime is configured to use. Do not publish or deploy this task; when the user later deploys to production, they should review and back up that database first.
-- Add private profile-picture upload using the existing managed object-storage helpers. Store only its key in the profile row and issue signed reads to the authenticated owner; show the image in the profile screen and app shell.
+- Store new private profile pictures in a persistent per-user server directory, retain read compatibility for older Forge-backed avatar keys, and serve local images only to the authenticated owner. KYC documents remain Forge-backed and are not migrated by this change.
 
 ## Implementation approach
 
@@ -29,7 +29,7 @@
 
 ### Profile pictures and user guidance
 
-- Add an optional profile image key to `client_profiles` and an authenticated upload mutation. Accept only JPEG/PNG image bytes, enforce a 5 MiB limit server-side, use a generated ASCII object key under a private per-user prefix, and write an audit event. Return only an expiring signed URL for display; never expose server credentials.
+- Add an optional profile image key to `client_profiles` and an authenticated upload mutation. Accept only JPEG/PNG image bytes, enforce a 5 MiB limit server-side, use a generated opaque file name under a private per-user directory, and write an audit event. Serve local files through an owner-authenticated route; never expose filesystem paths or server credentials. Keep older Forge-backed avatar keys readable when Forge is configured.
 - Add an upload/update control and preview in Settings and use the user’s image in the dashboard avatar with the existing initials fallback. This is an optional profile field, not a KYC prerequisite.
 - Update French UI copy in Documents, Wallets, Market, Home, and Settings so users understand they can register/deposit/trade before KYC, while withdrawals require approved KYC plus all three accepted documents. Display the 2.5% fee and net payout before submitting a withdrawal.
 
@@ -49,12 +49,15 @@
 
 - `drizzle/schema.ts` and a generated additive migration: profile image key, withdrawal fee/payout fields, and Africoin fee ledger.
 - `server/tradingGuards.ts`, `server/kelpay.ts`, `server/routers.ts`, and `server/withdrawals.ts`: centralized eligibility changes, deposit/trade access, withdrawal lifecycle, fee accounting, and authorized API procedures.
+- `server/profilePictureStore.ts`, `server/_core/profilePictureRoute.ts`, and `deploy/docker-compose.yml`: local private avatar files, authenticated retrieval, and a persistent host-directory mount. This follow-up adds no database migration; avatar files require separate backups from MySQL.
 - `client/src/pages/Wallets.tsx`, `client/src/pages/Admin.tsx`, `client/src/pages/Documents.tsx`, `client/src/pages/Market.tsx`, `client/src/pages/Home.tsx`, `client/src/pages/Settings.tsx`, and `client/src/components/DashboardLayout.tsx`: customer guidance, fee preview, staff completion/reporting, and avatar controls.
 - Focused unit/contract tests alongside the existing server tests; existing application structure and UI primitives remain in use.
 
 ## Existing production database boundary
 
 The approved WebDev-managed database is shared between development/Preview and any WebDev-published runtime; the WebDev platform does not provide a separate managed staging database. This work may migrate that project-managed database when Preview starts. Do not request or set the separately operated production `DATABASE_URL`, connect this Sandbox to it, or run migrations against it, and do not publish/deploy from this task. The existing server startup calls `runDatabaseMigrations()` automatically: after the user deploys this code, that existing hook will apply checked-in migrations to whichever database the production runtime is configured to use. The new Drizzle migration is additive (new table, nullable/zero-default columns, and a backfill of existing payout amounts); it does not drop tables or erase existing user data. The user should review/backup their existing production database under their own release process before deploying.
+
+The local-avatar storage follow-up adds no schema migration and does not change KYC document storage. Production deployment must create a persistent host directory writable by the container’s `node` user and back up that directory separately from the database.
 
 
 ## Preview no-KYC flow QA follow-up

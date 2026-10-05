@@ -58,6 +58,7 @@ import { buildFundingDecisionNotification } from "./notificationService";
 import { cancelApprovedWithdrawalRequest, completeWithdrawalPayout, createWithdrawalRequest, decideWithdrawalRequest, getWithdrawalEligibility, isWithdrawalAwaitingAdminReview } from "./withdrawals";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES } from "./profileMedia";
+import { deleteLocalProfilePicture, isLocalProfilePictureKey, localProfilePictureUrl, saveLocalProfilePicture } from "./profilePictureStore";
 import { adjustAdminUserWallet, createAdminAccount, deleteAdminUser, getAdminUserDetail, listAdminUsers, requestAdminUserRole, requestAdminUserStatus, reviewAdminUserKyc, setSuperAdminUserStatus, updateAdminUserAccount } from "./adminUsers";
 import { createApprovalRequest, decideApproval, listApprovalRequests } from "./adminApprovals";
 import { hashPassword, normalizeEmail, verifyPassword } from "./localAuth";
@@ -180,7 +181,11 @@ export const appRouter = router({
       const profile = await ensureClientProfile(ctx.user.id);
       const base = profile ?? { id: 0, userId: ctx.user.id, phone: null, country: "RDC", preferredCurrency: "USD" as const, investorExperience: "none" as const, riskProfile: "unassessed" as const, riskScore: null, avatarStorageKey: null, createdAt: new Date(), updatedAt: new Date() };
       const { avatarStorageKey, ...safeProfile } = base;
-      const avatarUrl = avatarStorageKey ? await storageGetSignedUrl(avatarStorageKey).catch(() => null) : null;
+      const avatarUrl = avatarStorageKey
+        ? isLocalProfilePictureKey(avatarStorageKey)
+          ? localProfilePictureUrl(avatarStorageKey)
+          : await storageGetSignedUrl(avatarStorageKey).catch(() => null)
+        : null;
       return { ...safeProfile, avatarUrl };
     }),
     uploadAvatar: protectedProcedure.input(z.object({ mimeType: z.enum(["image/jpeg", "image/png"]), base64: z.string().min(16).max(7_000_000) })).mutation(async ({ ctx, input }) => {
@@ -189,12 +194,26 @@ export const appRouter = router({
       const bytes = Buffer.from(input.base64, "base64");
       if (bytes.length > MAX_PROFILE_PICTURE_BYTES) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "La photo ne peut pas dépasser 5 Mio." });
       if (!isValidProfilePicture(input.mimeType, bytes)) throw new TRPCError({ code: "BAD_REQUEST", message: "Choisissez une image JPEG ou PNG valide." });
-      const extension = input.mimeType === "image/jpeg" ? "jpg" : "png";
-      const stored = await storagePut(`private-profile-pictures/${ctx.user.id}/avatar.${extension}`, bytes, input.mimeType);
-      await ensureClientProfile(ctx.user.id);
-      await db.update(clientProfiles).set({ avatarStorageKey: stored.key }).where(eq(clientProfiles.userId, ctx.user.id));
+      const profile = await ensureClientProfile(ctx.user.id);
+      if (!profile) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Profil indisponible." });
+      let stored: Awaited<ReturnType<typeof saveLocalProfilePicture>>;
+      try {
+        stored = await saveLocalProfilePicture(ctx.user.id, bytes, input.mimeType);
+      } catch (error) {
+        console.error("[ProfilePicture] Failed to save upload:", error);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Le serveur ne peut pas enregistrer la photo de profil." });
+      }
+      try {
+        await db.update(clientProfiles).set({ avatarStorageKey: stored.key }).where(eq(clientProfiles.userId, ctx.user.id));
+      } catch (error) {
+        await deleteLocalProfilePicture(stored.key, ctx.user.id).catch(cleanupError => console.error("[ProfilePicture] Failed to clean up an unreferenced upload:", cleanupError));
+        throw error;
+      }
+      if (profile.avatarStorageKey && isLocalProfilePictureKey(profile.avatarStorageKey)) {
+        await deleteLocalProfilePicture(profile.avatarStorageKey, ctx.user.id).catch(error => console.error("[ProfilePicture] Failed to remove replaced image:", error));
+      }
       await writeAuditLog({ actorUserId: ctx.user.id, action: "profile.avatar_updated", entityType: "client_profile", entityId: String(ctx.user.id), metadata: { mimeType: input.mimeType, sizeBytes: bytes.length } });
-      return { success: true as const, avatarUrl: await storageGetSignedUrl(stored.key).catch(() => null) };
+      return { success: true as const, avatarUrl: stored.url };
     }),
     update: protectedProcedure.input(z.object({ phone: z.string().max(40).optional(), country: z.string().max(80).optional(), dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), address: z.string().max(255).optional(), city: z.string().max(100).optional(), occupation: z.string().max(120).optional(), sourceOfFunds: z.enum(["salary", "business", "investments", "savings", "inheritance", "other"]).optional(), preferredCurrency: z.enum(["CDF", "USD"]).optional(), investorExperience: z.enum(["none", "beginner", "intermediate", "advanced"]).optional() })).mutation(async ({ ctx, input }) => {
       const db = await getDb();
