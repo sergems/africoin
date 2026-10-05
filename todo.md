@@ -80,3 +80,15 @@
 - `pnpm build` passed and compiled `dist/migrateKycDocumentsToLocal.js`; existing analytics-placeholder and large-chunk warnings remain.
 - Compose YAML parsed and the KYC persistent bind mount was asserted with PyYAML; Docker CLI is unavailable in the Sandbox, so `docker compose config -q` was not run here.
 - `git diff --check` passed. No Linode server was accessed and the one-time legacy-file migration was not executed.
+
+## Profile-picture storage permission repair
+
+- [x] After a fast-forward Git pull, the deploy helper reloads the updated script, prepares both persistent bind-mount roots for runtime UID/GID 1000, and verifies write access as the app user before proceeding.
+- [x] Profile upload errors distinguish storage permission/read-only failures from exhausted disk/quota, while logs record only the error code.
+- [x] Document a one-time, non-destructive repair for existing profile/KYC folders and keep the Linode runbook aligned.
+
+### Verification evidence
+
+- `pnpm check`, `pnpm test` (22 files, 100 tests), and `pnpm build` passed; existing analytics-placeholder and large-chunk warnings remain.
+- `bash -n deploy/scripts/deploy.sh` and `git diff --check` passed. Compose YAML parsed and both persistent upload mounts were asserted with PyYAML; the Docker CLI is unavailable in the Sandbox.
+- No Linode server was accessed or changed.

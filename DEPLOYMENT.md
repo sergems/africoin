@@ -91,11 +91,13 @@ Required values are:
 
 `BUILT_IN_FORGE_API_URL` and `BUILT_IN_FORGE_API_KEY` are not needed for new profile-picture or KYC-document uploads. They may still be used by other optional services and are temporarily needed to read/copy previously Forge-backed KYC documents until migration is complete. The Vite build-time values `VITE_FRONTEND_FORGE_API_URL`, `VITE_FRONTEND_FORGE_API_KEY`, `VITE_ANALYTICS_ENDPOINT`, and `VITE_ANALYTICS_WEBSITE_ID` are also optional. Only put a browser-safe key in a `VITE_*` variable because Vite embeds these values in the browser bundle.
 
-`PROFILE_PICTURE_STORAGE_HOST_DIR` and `KYC_DOCUMENT_STORAGE_HOST_DIR` optionally change the host directories used for user media; the defaults are `/var/lib/africoin/profile-pictures` and `/var/lib/africoin/kyc-documents`. Create both before starting the app and grant them to the runtime `node` user (UID/GID 1000):
+`PROFILE_PICTURE_STORAGE_HOST_DIR` and `KYC_DOCUMENT_STORAGE_HOST_DIR` optionally change the host directories used for user media; the defaults are `/var/lib/africoin/profile-pictures` and `/var/lib/africoin/kyc-documents`. The deployment helper prepares these mount roots for the runtime `node` user (UID/GID 1000) and checks write access before starting the app. For manual preparation, use:
 
 ```bash
 install -d -o 1000 -g 1000 -m 750 /var/lib/africoin/profile-pictures /var/lib/africoin/kyc-documents
 ```
+
+If an existing upload fails because a folder is root-owned, use the one-time repair procedure in the upload troubleshooting section below.
 
 The app container bind-mounts both folders; do not store either type of file only in the disposable container filesystem. New KYC documents are validated and written under the Linode KYC folder, with per-user/per-case subdirectories and restrictive permissions. The database stores an opaque local key, not an absolute filesystem path. Access is served through an authenticated endpoint for the owner and users with the KYC-review permission; do not expose these host paths through Nginx or a static-file server. Files are plaintext on disk, so restrict host/snapshot/backup access and use encrypted-volume protection if required by your compliance policy.
 
@@ -315,7 +317,7 @@ The same workflow is wrapped by the safe update script:
 ./deploy.sh
 ```
 
-The script performs a fast-forward-only `git pull`, validates Compose, builds the images, starts MySQL, runs migrations, starts the app, and waits for `/api/health`. It never deletes containers or volumes. If the repository has local changes or the pull cannot be fast-forwarded, it stops.
+The script performs a fast-forward-only `git pull` (and re-executes the freshly pulled helper if the branch advanced), validates Compose, builds the images, prepares and verifies the profile/KYC media folders as writable by the app user, starts MySQL, runs migrations, starts the app, and waits for `/api/health`. It never deletes containers or volumes. If the repository has local changes or the pull cannot be fast-forwarded, it stops.
 
 To deploy code already present on disk without pulling:
 
@@ -709,7 +711,22 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs --tail=200 app
 grep client_max_body_size /etc/nginx/sites-enabled/africoin
 ```
 
-**Solution:** The current app allows 50 MB in Express and the supplied Nginx config allows 50 MB; individual profile pictures are limited to 5 MiB and KYC documents to 10 MiB. Verify both host directories exist and are owned by UID/GID 1000. New KYC uploads do not require Forge; temporarily retain its credentials only if legacy KYC files still need to be read or copied, or another app feature uses Forge. Check app logs for local permission errors.
+**Solution:** The current app allows 50 MB in Express and the supplied Nginx config allows 50 MB; individual profile pictures are limited to 5 MiB and KYC documents to 10 MiB. The deployment helper now creates the storage roots and verifies them as the app user. For an existing failure, back up the two media folders, then repair their ownership from `/opt/africoin`:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml stop app
+docker compose --env-file .env -f deploy/docker-compose.yml run --rm --no-deps --user 0:0 app sh -eu -c '
+  for d in /var/lib/africoin/profile-pictures /var/lib/africoin/kyc-documents; do
+    mkdir -p "$d"
+    chown -R --no-dereference 1000:1000 "$d"
+    chmod -R u+rwX,go-rwx "$d"
+    chmod 0750 "$d"
+  done
+'
+docker compose --env-file .env -f deploy/docker-compose.yml up -d app
+```
+
+This changes owner/mode only; it does not remove files. Compose maps custom host paths from `.env` to these fixed container paths. New KYC uploads do not require Forge; temporarily retain its credentials only if legacy KYC files still need to be read or copied, or another app feature uses Forge. Check app logs for local permission or disk-space errors if the upload still fails.
 
 ### WebSocket connection errors
 

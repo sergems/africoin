@@ -57,7 +57,7 @@ import { getProviderRegistry } from "./providers";
 import { buildFundingDecisionNotification } from "./notificationService";
 import { cancelApprovedWithdrawalRequest, completeWithdrawalPayout, createWithdrawalRequest, decideWithdrawalRequest, getWithdrawalEligibility, isWithdrawalAwaitingAdminReview } from "./withdrawals";
 import { storageGetSignedUrl } from "./storage";
-import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES } from "./profileMedia";
+import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES, profilePictureStorageErrorMessage } from "./profileMedia";
 import { deleteLocalProfilePicture, isLocalProfilePictureKey, localProfilePictureUrl, saveLocalProfilePicture } from "./profilePictureStore";
 import { deleteLocalKycDocument, detectKycDocumentMimeType, kycDocumentUrl, MAX_KYC_DOCUMENT_BYTES, saveLocalKycDocument } from "./kycDocumentStore";
 import { adjustAdminUserWallet, createAdminAccount, deleteAdminUser, getAdminUserDetail, listAdminUsers, requestAdminUserRole, requestAdminUserStatus, reviewAdminUserKyc, setSuperAdminUserStatus, updateAdminUserAccount } from "./adminUsers";
@@ -208,8 +208,11 @@ export const appRouter = router({
       try {
         stored = await saveLocalProfilePicture(ctx.user.id, bytes, input.mimeType);
       } catch (error) {
-        console.error("[ProfilePicture] Failed to save upload:", error);
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Le serveur ne peut pas enregistrer la photo de profil." });
+        const errorCode = error && typeof error === "object" && "code" in error
+          ? (error as { code?: unknown }).code
+          : undefined;
+        console.error("[ProfilePicture] Failed to save upload:", typeof errorCode === "string" ? errorCode : "unknown");
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: profilePictureStorageErrorMessage(error) });
       }
       try {
         await db.update(clientProfiles).set({ avatarStorageKey: stored.key }).where(eq(clientProfiles.userId, ctx.user.id));

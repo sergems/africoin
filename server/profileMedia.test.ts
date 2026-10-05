@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES } from "./profileMedia";
+import { isValidProfilePicture, MAX_PROFILE_PICTURE_BYTES, profilePictureStorageErrorMessage } from "./profileMedia";
 
 describe("profile-picture validation", () => {
   it("accepts matching JPEG and PNG signatures", () => {
@@ -14,5 +14,11 @@ describe("profile-picture validation", () => {
 
   it("rejects uploads larger than five MiB", () => {
     expect(isValidProfilePicture("image/png", new Uint8Array(MAX_PROFILE_PICTURE_BYTES + 1))).toBe(false);
+  });
+
+  it("explains server storage permission and disk-capacity failures", () => {
+    expect(profilePictureStorageErrorMessage({ code: "EACCES" })).toContain("permissions");
+    expect(profilePictureStorageErrorMessage({ code: "ENOSPC" })).toContain("espace disponible");
+    expect(profilePictureStorageErrorMessage(new Error("unexpected"))).toBe("Le serveur ne peut pas enregistrer la photo de profil.");
   });
 });

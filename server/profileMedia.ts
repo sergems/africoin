@@ -15,3 +15,17 @@ export function isValidProfilePicture(mimeType: ProfilePictureMimeType, bytes: U
     && bytes[6] === 0x1a
     && bytes[7] === 0x0a;
 }
+
+export function profilePictureStorageErrorMessage(error: unknown): string {
+  const code = error && typeof error === "object" && "code" in error
+    ? (error as { code?: unknown }).code
+    : undefined;
+
+  if (code === "EACCES" || code === "EPERM" || code === "EROFS" || code === "ENOTDIR") {
+    return "Le dossier de stockage des photos n’est pas accessible. Vérifiez ses permissions sur le serveur.";
+  }
+  if (code === "ENOSPC" || code === "EDQUOT") {
+    return "Le serveur n’a plus d’espace disponible pour enregistrer cette photo.";
+  }
+  return "Le serveur ne peut pas enregistrer la photo de profil.";
+}
